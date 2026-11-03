@@ -12,14 +12,16 @@ Add the package to your `Package.swift`:
 
 ```swift
 dependencies: [
-	.package(url: "https://github.com/melgu/TidalSwiftLib", from: "1.0.0")
+	.package(url: "https://github.com/melgu/TidalSwiftLib", .upToNextMinor(from: "0.1.0"))
 ],
 targets: [
 	.target(name: "MyApp", dependencies: ["TidalSwiftLib"])
 ]
 ```
 
-In Xcode, choose File › Add Package Dependencies… and enter the URL.
+In Xcode, choose File › Add Package Dependencies… and enter the URL, with the dependency rule "Up to Next Minor Version".
+
+Until 1.0.0, the API is still settling: a new minor version (0.2.0) can contain breaking changes, a new patch version (0.1.1) doesn't.
 
 
 
@@ -55,3 +57,9 @@ if let results = await session.search(for: "Jacob Collier") {
 ```
 
 The library logs with OSLog under the subsystem `de.melgu.TidalSwiftLib` and never writes to stdout, so command line tools can use stdout for their output.
+
+
+
+## License
+
+TidalSwiftLib is licensed under the [GNU General Public License v3.0](LICENSE). Apps that use it have to be released under the GPL as well.
