@@ -42,33 +42,8 @@ nonisolated public enum HLSDownloader {
 		let handle = try FileHandle(forWritingTo: streamURL)
 		defer { try? handle.close() }
 		
-		try await withThrowingTaskGroup(of: (Int, Data).self) { group in
-			var nextToFetch = 0
-			var nextToWrite = 0
-			var fetched: [Int: Data] = [:]
-			
-			func fetchMore() {
-				while nextToFetch < segments.count, nextToFetch < nextToWrite + parallelSegments {
-					let index = nextToFetch
-					let url = segments[index]
-					group.addTask {
-						(index, try await fetch(url).data)
-					}
-					nextToFetch += 1
-				}
-			}
-			
-			fetchMore()
-			while let (index, data) = try await group.next() {
-				fetched[index] = data
-				// Segments arrive in any order, but have to be written in the playlist's
-				while let data = fetched.removeValue(forKey: nextToWrite) {
-					try handle.write(contentsOf: data)
-					nextToWrite += 1
-					await progress(Double(nextToWrite) / Double(segments.count))
-				}
-				fetchMore()
-			}
+		try await fetchSegments(segments, progress: progress) { data in
+			try handle.write(contentsOf: data)
 		}
 		try handle.close()
 		
@@ -98,8 +73,40 @@ nonisolated public enum HLSDownloader {
 		try fileManager.moveItem(at: exportURL, to: outputURL)
 	}
 	
+	/// Loads a few segments at the same time, but hands them to `write` in their order
+	static func fetchSegments(_ segments: [URL], progress: @escaping @MainActor @Sendable (Double) -> Void, write: (Data) throws -> Void) async throws {
+		try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+			var nextToFetch = 0
+			var nextToWrite = 0
+			var fetched: [Int: Data] = [:]
+			
+			func fetchMore() {
+				while nextToFetch < segments.count, nextToFetch < nextToWrite + parallelSegments {
+					let index = nextToFetch
+					let url = segments[index]
+					group.addTask {
+						(index, try await fetch(url).data)
+					}
+					nextToFetch += 1
+				}
+			}
+			
+			fetchMore()
+			while let (index, data) = try await group.next() {
+				fetched[index] = data
+				// Segments arrive in any order, but have to be written in the playlist's
+				while let data = fetched.removeValue(forKey: nextToWrite) {
+					try write(data)
+					nextToWrite += 1
+					await progress(Double(nextToWrite) / Double(segments.count))
+				}
+				fetchMore()
+			}
+		}
+	}
+	
 	/// Retries network failures, but not responses that won't change
-	private static func fetch(_ url: URL) async throws -> (data: Data, url: URL) {
+	static func fetch(_ url: URL) async throws -> (data: Data, url: URL) {
 		var attempt = 1
 		while true {
 			do {

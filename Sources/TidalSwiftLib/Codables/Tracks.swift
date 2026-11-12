@@ -6,6 +6,7 @@
 //  Copyright © 2020 Melvin Gundlach. All rights reserved.
 //
 
+import AVFoundation
 import Foundation
 
 struct Tracks: Decodable {
@@ -90,6 +91,10 @@ public struct Track: Codable, Equatable, Identifiable, Hashable {
 	
 	/// Dolby Atmos is used when preferred or when the track has no stereo version
 	public func audioStream(session: Session, audioQuality: AudioQuality, preferDolbyAtmos: Bool) async -> AudioStream? {
+		// Tidal sends this login stereo even for Atmos-only tracks
+		if session.isPKCELogin {
+			return await session.dashStream(trackId: id, audioQuality: audioQuality)
+		}
 		if hasDolbyAtmos && (preferDolbyAtmos || !hasStereo) {
 			if let url = await session.dolbyAtmosUrl(trackId: id) {
 				return AudioStream(url: url, pathExtension: "m4a", isDolbyAtmos: true)
@@ -118,19 +123,59 @@ public struct Track: Codable, Equatable, Identifiable, Hashable {
 }
 
 public struct AudioStream {
+	/// For DASH streams a URL with a custom scheme, which only ``makeAsset(options:)`` can play.
+	/// Use ``download(to:)`` to store a stream.
 	public let url: URL
 	public let pathExtension: String
 	public let isDolbyAtmos: Bool
+	/// The quality Tidal delivers, which can be lower than the requested one. Nil if Tidal doesn't tell.
+	public internal(set) var audioQuality: AudioQuality?
+	/// Segments the stream consists of, if it isn't a single file
+	let dashManifest: DASHManifest?
+	private let trackId: Int?
 	
 	public init(url: URL, pathExtension: String, isDolbyAtmos: Bool) {
 		self.url = url
 		self.pathExtension = pathExtension
 		self.isDolbyAtmos = isDolbyAtmos
+		self.dashManifest = nil
+		self.trackId = nil
+	}
+	
+	init(trackId: Int, manifest: DASHManifest, isDolbyAtmos: Bool) {
+		self.url = DASHAsset.url(trackId: trackId)
+		self.pathExtension = manifest.isFLAC ? "flac" : "m4a"
+		self.isDolbyAtmos = isDolbyAtmos
+		self.dashManifest = manifest
+		self.trackId = trackId
+	}
+	
+	/// Whether the stream is split into segments, which AVPlayer only plays through ``makeAsset(options:)``
+	public var isSegmented: Bool {
+		dashManifest != nil
+	}
+	
+	/// An asset AVPlayer can play, which a plain `AVURLAsset(url:)` isn't for DASH streams
+	public func makeAsset(options: [String: Any]? = nil) -> AVURLAsset {
+		if let dashManifest, let trackId {
+			return DASHAsset(manifest: dashManifest, trackId: trackId, options: options)
+		}
+		return AVURLAsset(url: url, options: options)
+	}
+	
+	/// Stores the stream in a single file, replacing an existing one
+	public func download(to path: URL) async throws {
+		if let dashManifest {
+			try await DASHDownloader.download(dashManifest, to: path)
+		} else {
+			try await Network.download(url, path: path, overwrite: true)
+		}
 	}
 }
 
 struct TrackPlaybackInfo: Decodable {
 	let audioMode: AudioMode
+	let audioQuality: AudioQuality?
 	let manifestMimeType: String
 	let manifest: String
 }

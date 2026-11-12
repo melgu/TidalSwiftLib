@@ -55,6 +55,33 @@ Parameters: `audioquality`, `playbackmode`, `assetpresentation=FULL`, optionally
 - Adding the iOS app's parameters (`deviceType=PHONE`, `platform=IOS`, `locale`) changes nothing.
 - The Atmos file is a 5.1-bed E-AC-3 JOC stream in MP4. `afinfo` lists the Atmos (`ec+3`) layouts up to 9.1.6, `ffprobe` reports "Dolby Digital Plus + Dolby Atmos", and `AVPlayer` plays it from a local file.
 
+#### With the PKCE client (November 2026)
+
+Logged in with the Android client that [tidalapi](https://github.com/EbbLabs/python-tidal) uses (`client_id` `6BDSRdpK9hqEBTgU`, authorization code flow with PKCE, see `Session/PKCELogin.swift`), the same endpoint answers differently. Billie Eilish – INTRO (HIT ME HARD AND SOFT TOUR), 518097666, tags `LOSSLESS`, `HIRES_LOSSLESS`:
+
+| Request | Result |
+|---|---|
+| `LOSSLESS`, `STREAM` or `OFFLINE` | DASH manifest (`application/dash+xml`), `flac`, 16 bit / 44.1 kHz, no `ContentProtection` |
+| `HI_RES_LOSSLESS`, `STREAM` or `OFFLINE` | DASH manifest, `flac`, **24 bit / 48 kHz**, ~1.66 Mbit/s, no `ContentProtection`, `audioQuality: HI_RES_LOSSLESS` |
+
+- The response carries `bitDepth` and `sampleRate`.
+- A track without the `HIRES_LOSSLESS` tag gets 16/44.1 for `HI_RES_LOSSLESS`.
+- So unencrypted Hi-Res is available, also in offline mode, but only as DASH, which `AVPlayer` can't play. Playing or downloading it means fetching and joining the DASH segments.
+- `HIGH` gives unencrypted AAC-LC (`mp4a.40.2`, ~320 kbit/s) as DASH as well, unlike the Widevine/PlayReady DASH TidalSwift's client gets.
+- **No Dolby Atmos on v1.** Both Blinding Lights tracks (125155092, Atmos only, and 188600501) return `audioMode: STEREO` FLAC or AAC for every quality, `playbackmode` and `immersiveaudio` value (`true`, `false`, missing). Even the Atmos-only track gets a stereo stream, up to 24 bit / 44.1 kHz. The existing `dolbyAtmosUrl` returns nil.
+- openapi `trackManifests` with `formats=EAC3_JOC` answers 200 for this client (TidalSwift's gets 403 `CLIENT_NOT_ENTITLED`), with an HLS master playlist with `CODECS="ec-3"` at ~770 kbit/s, but FairPlay encrypted (`skd://`), like `FLAC_HIRES`.
+- So this client trades the unencrypted Atmos of TidalSwift's client for unencrypted Hi-Res. Keeping both means two logins, one per client.
+- **`streamUrl` refuses this client:** 401 `subStatus 4005` "Asset is not ready for playback" for `LOW`, `HIGH`, `LOSSLESS` and `HI_RES_LOSSLESS` on all three test tracks. With only this login, nothing plays until TidalSwift handles the DASH manifests.
+- The response also carries `trackReplayGain`, `trackPeakAmplitude`, `albumReplayGain` and `albumPeakAmplitude`.
+
+The manifest has a single `Representation` (e.g. `id="FLAC_HIRES,48000,24"`) with a `SegmentTemplate`: an initialization segment `…/0.mp4` and media segments `…/$Number$.mp4` from `startNumber="1"`, all absolute URLs on `sp-ad-fa.audio.tidal.com` with a token in the query, and a `SegmentTimeline` of ~3.9-second segments (`timescale` = sample rate). The initialization segment is `ftyp` + `moov` with an `fLaC` sample entry and its `dfLa` box (FLAC-in-ISOBMFF), media segments are `moof` + `mdat`, without `tenc`, `senc` or `pssh`.
+
+TidalSwiftLib uses these streams for the PKCE login (`Session.dashStream`, `DASHManifest`, `DASHStream.swift`):
+
+- **Playback:** AVPlayer neither plays DASH nor HLS playlists from `file://` URLs (the item stays `unknown`). `DASHAsset` gives AVPlayer a custom-scheme URL whose resource loader answers with an HLS media playlist (`EXT-X-MAP` for the initialization segment, one `EXTINF` per timeline entry); AVPlayer loads the segments from Tidal itself. Playback, duration and seeking work.
+- **Download:** FLAC streams become native FLAC files: `fLaC`, the metadata blocks from `dfLa` (with the total sample count filled in, which the encoder leaves at 0) and the `mdat` payloads of all segments, which are the FLAC frames. `flac -t` accepts the result, and `FLACTagWriter` tags it. AAC streams are stored as the initialization segment followed by the media segments, a fragmented MP4 that `afinfo` reads.
+- Untested: whether the token in the segment URLs expires, which would break a stream that is paused for long.
+
 ### openapi `GET https://openapi.tidal.com/v2/trackManifests/{id}`
 
 Parameters: `manifestType` (`HLS` or `MPEG_DASH`), `formats` (repeated: `HEAACV1`, `AACLC`, `FLAC`, `FLAC_HIRES`, `EAC3_JOC`), `uriScheme` (`HTTPS` or `DATA`), `usage=PLAYBACK`, `adaptive=true`. Header `Accept: application/vnd.api+json`. Accepts the same bearer token as v1; an expired token gives 401 with a JSON:API error (`"detail": "Expired token"`).

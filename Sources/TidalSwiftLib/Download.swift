@@ -164,7 +164,7 @@ public class Download {
 		let path = path(in: options.destination, parentFolder: parentFolder, name: filename, pathExtension: stream.pathExtension)
 		
 		do {
-			try await Network.download(stream.url, path: path, overwrite: true)
+			try await stream.download(to: path)
 		} catch {
 			displayError(title: "Error while downloading track", content: "Download failed for track \(track.title). Error: \(error)")
 			throw .transfer(underlying: error)

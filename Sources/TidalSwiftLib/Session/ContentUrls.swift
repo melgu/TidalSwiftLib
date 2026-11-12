@@ -7,8 +7,16 @@
 //
 
 import Foundation
+import OSLog
+
+private let logger = Logger(category: "ContentUrls")
 
 extension Session {
+	/// Whether the login is the PKCE one, which gets Hi-Res, but no Dolby Atmos and no `streamUrl`
+	var isPKCELogin: Bool {
+		config.clientID == AuthInformation.PKCEClientID
+	}
+	
 	func audioUrl(trackId: Int, audioQuality: AudioQuality) async -> URL? {
 		var parameters = sessionParameters
 		parameters["soundQuality"] = "\(audioQuality.rawValue)"
@@ -67,11 +75,43 @@ extension Session {
 		}
 	}
 	
+	/// The PKCE login gets unencrypted DASH streams in every quality, but `streamUrl` refuses it
+	func dashStream(trackId: Int, audioQuality: AudioQuality) async -> AudioStream? {
+		let url = URL(string: "\(AuthInformation.APILocation)/tracks/\(trackId)/playbackinfopostpaywall")!
+		var parameters = sessionParameters
+		parameters["audioquality"] = audioQuality.rawValue
+		parameters["playbackmode"] = "STREAM"
+		parameters["assetpresentation"] = "FULL"
+		do {
+			let response: TrackPlaybackInfo = try await get(url: url, parameters: parameters)
+			guard let manifestData = Data(base64Encoded: response.manifest) else { return nil }
+			var stream: AudioStream
+			switch response.manifestMimeType {
+			case "application/dash+xml":
+				let manifest = try DASHManifest(manifestData)
+				stream = AudioStream(trackId: trackId, manifest: manifest, isDolbyAtmos: response.audioMode == .dolbyAtmos)
+			case "application/vnd.tidal.bts":
+				let manifest = try JSONDecoder().decode(TrackManifest.self, from: manifestData)
+				guard manifest.encryptionType == "NONE", let url = manifest.urls.first?.upgradedToHTTPS else { return nil }
+				let pathExtension = manifest.codecs == "flac" ? "flac" : "m4a"
+				stream = AudioStream(url: url, pathExtension: pathExtension, isDolbyAtmos: response.audioMode == .dolbyAtmos)
+			default:
+				logger.error("Unsupported manifest type \(response.manifestMimeType, privacy: .public)")
+				return nil
+			}
+			stream.audioQuality = response.audioQuality
+			return stream
+		} catch {
+			logger.error("No DASH stream for track \(trackId): \(String(describing: error), privacy: .public)")
+			return nil
+		}
+	}
+	
 	func pathExtension(for audioQuality: AudioQuality) -> String {
 		switch audioQuality {
 		case .low, .medium:
 			return "m4a"
-		case .high:
+		case .high, .max:
 			return "flac"
 		}
 	}
