@@ -37,7 +37,7 @@ extension Network {
 	}
 	
 	#if DEBUG
-	private static let secretKeys = "access_token|refresh_token|id_token|client_secret|device_code|deviceCode|user_code|userCode"
+	private static let secretKeys = "access_token|refresh_token|id_token|client_secret|device_code|deviceCode|user_code|userCode|code|code_verifier"
 	private static let formSecretRegex = try! NSRegularExpression(pattern: "\\b(\(secretKeys))=[^&]*")
 	private static let jsonSecretRegex = try! NSRegularExpression(pattern: "\"(\(secretKeys))\"\\s*:\\s*\"[^\"]*\"")
 	

@@ -22,7 +22,7 @@ extension Session {
 		try await populateVariablesForAccessToken()
 	}
 	
-	private func setAccessToken(_ accessToken: String, refreshToken: String?, expiresIn: Int) {
+	func setAccessToken(_ accessToken: String, refreshToken: String?, expiresIn: Int) {
 		var token = accessToken
 		if !token.hasPrefix("Bearer ") {
 			token = "Bearer " + token
@@ -192,9 +192,12 @@ extension Session {
 			"grant_type": "refresh_token",
 			"scope": AuthInformation.scope
 		]
-		// The built-in client is confidential: Tidal rejects its refresh requests without the secret
+		// The built-in clients are confidential: Tidal rejects their refresh requests without the secret
 		if config.clientID == AuthInformation.OAuthClientID {
 			parameters["client_secret"] = AuthInformation.OAuthClientSecret
+		} else if config.clientID == AuthInformation.PKCEClientID {
+			parameters["client_secret"] = AuthInformation.PKCEClientSecret
+			parameters["scope"] = AuthInformation.PKCEScope
 		}
 		
 		let response: Response
