@@ -12,7 +12,7 @@ Add the package to your `Package.swift`:
 
 ```swift
 dependencies: [
-	.package(url: "https://github.com/melgu/TidalSwiftLib", .upToNextMinor(from: "0.1.0"))
+	.package(url: "https://github.com/melgu/TidalSwiftLib", .upToNextMinor(from: "0.2.0"))
 ],
 targets: [
 	.target(name: "MyApp", dependencies: ["TidalSwiftLib"])
@@ -21,7 +21,7 @@ targets: [
 
 In Xcode, choose File › Add Package Dependencies… and enter the URL, with the dependency rule "Up to Next Minor Version".
 
-Until 1.0.0, the API is still settling: a new minor version (0.2.0) can contain breaking changes, a new patch version (0.1.1) doesn't.
+Until 1.0.0, the API is still settling: a new minor version (0.3.0) can contain breaking changes, a new patch version (0.2.1) doesn't.
 
 
 
@@ -55,6 +55,31 @@ if let results = await session.search(for: "Jacob Collier") {
 	}
 }
 ```
+
+### Logins
+
+There are two ways to log in, which get different streams. A session can hold one of each for the same account, and then picks the right one for every stream.
+
+| | Device login | PKCE login |
+|---|---|---|
+| Flow | `startAuthorization()`: approve a code in the browser | `startPKCEAuthorization()`: log in in the browser, then pass the address of the error page Tidal shows to `finishPKCEAuthorization(_:redirectUrl:)` |
+| Qualities | High (FLAC 16 bit / 44.1 kHz) | Low, High and Max (FLAC up to 24 bit / 192 kHz) |
+| Dolby Atmos | Yes | No, tracks play in stereo |
+
+Whichever login comes first is the main one. Logging in with the other kind adds it as the second login, `loginKinds` tells which ones the session holds.
+
+### Playing and Storing Tracks
+
+`Track.audioStream(session:audioQuality:preferDolbyAtmos:)` returns the stream. Some streams are split into segments, so play them through `makeAsset(options:)` and store them with `download(to:)` instead of using their `url` directly.
+
+```swift
+if let stream = await track.audioStream(session: session, audioQuality: .max, preferDolbyAtmos: false) {
+	let player = AVPlayer(playerItem: AVPlayerItem(asset: stream.makeAsset()))
+	player.play()
+}
+```
+
+### Logging
 
 The library logs with OSLog under the subsystem `de.melgu.TidalSwiftLib` and never writes to stdout, so command line tools can use stdout for their output.
 
