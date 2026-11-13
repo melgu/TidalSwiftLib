@@ -45,37 +45,42 @@ public struct MixesItem: Codable, Equatable, Identifiable {
 	public let id: String
 	public let title: String
 	public let subTitle: String
-	public let graphic: MixesGraphic
+	/// The cover in several sizes. Optional, as mixes saved before it was added lack it.
+	public let images: MixesImages?
 	public let mixType: MixType
+	
+	/// The smallest cover that is at least `resolution` pixels wide, or the largest one there is
+	public func imageUrl(resolution: Int) -> URL? {
+		images?.url(resolution: resolution)
+	}
 	
 	public static func == (lhs: MixesItem, rhs: MixesItem) -> Bool {
 		lhs.id == rhs.id
 	}
 }
 
-public enum MixesGraphicType: String, Codable {
-	case squaresGrid = "SQUARES_GRID"
-	case rectanglesGrid = "RECTANGLES_GRID"
-}
-
-public struct MixesGraphic: Codable {
-	public let type: MixesGraphicType
-	public let text: String
-	public let images: [MixesGraphicImage]
-}
-
-public enum MixesGraphicImageType: String, Codable {
-	case artist = "ARTIST"
-}
-
-public struct MixesGraphicImage: Codable {
-	public let id: String
-	public let vibrantColor: String
-	public let type: MixesGraphicImageType
+public struct MixesImages: Codable {
+	public let small: MixesImage?
+	public let medium: MixesImage?
+	public let large: MixesImage?
 	
-	public func getImageUrl(session: Session, resolution: Int) -> URL? {
-		session.imageUrl(imageId: id, resolution: resolution)
+	enum CodingKeys: String, CodingKey {
+		case small = "SMALL"
+		case medium = "MEDIUM"
+		case large = "LARGE"
 	}
+	
+	/// The smallest image that is at least `resolution` pixels wide, or the largest one there is
+	public func url(resolution: Int) -> URL? {
+		let available = [small, medium, large].compactMap { $0 }.sorted { $0.width < $1.width }
+		return (available.first { $0.width >= resolution } ?? available.last)?.url
+	}
+}
+
+public struct MixesImage: Codable {
+	public let width: Int
+	public let height: Int
+	public let url: URL
 }
 
 struct Mix: Decodable {
