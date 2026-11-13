@@ -89,21 +89,23 @@ public struct Track: Codable, Equatable, Identifiable, Hashable {
 		streamReady && (audioModes?.contains { $0 != .sony360RealityAudio } ?? true)
 	}
 	
-	/// Dolby Atmos is used when preferred or when the track has no stereo version
+	/// Dolby Atmos is used when preferred or when the track has no stereo version.
+	///
+	/// Dolby Atmos needs the device login, Max the PKCE login. With both, everything else uses the device login.
 	public func audioStream(session: Session, audioQuality: AudioQuality, preferDolbyAtmos: Bool) async -> AudioStream? {
-		// Tidal sends this login stereo even for Atmos-only tracks
-		if session.isPKCELogin {
-			return await session.dashStream(trackId: id, audioQuality: audioQuality)
-		}
-		if hasDolbyAtmos && (preferDolbyAtmos || !hasStereo) {
+		let logins = session.loginKinds
+		if hasDolbyAtmos && (preferDolbyAtmos || !hasStereo) && logins.contains(.device) {
 			if let url = await session.dolbyAtmosUrl(trackId: id) {
 				return AudioStream(url: url, pathExtension: "m4a", isDolbyAtmos: true)
 			}
-			if !hasStereo {
-				return nil
+		}
+		// Tidal sends the PKCE login stereo even for Atmos-only tracks
+		if logins.contains(.pkce) && (audioQuality == .max || !logins.contains(.device) || !hasStereo) {
+			if let stream = await session.dashStream(trackId: id, audioQuality: audioQuality) {
+				return stream
 			}
 		}
-		guard let url = await session.audioUrl(trackId: id, audioQuality: audioQuality) else {
+		guard hasStereo, let url = await session.audioUrl(trackId: id, audioQuality: audioQuality) else {
 			return nil
 		}
 		return AudioStream(url: url, pathExtension: session.pathExtension(for: audioQuality), isDolbyAtmos: false)

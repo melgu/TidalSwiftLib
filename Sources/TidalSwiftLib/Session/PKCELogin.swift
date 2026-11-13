@@ -96,9 +96,7 @@ extension Session {
 		}
 		
 		if let successResponse = try? JSONDecoder.custom.decode(TokenSuccessResponse.self, from: response.data) {
-			setAccessToken(successResponse.accessToken, refreshToken: successResponse.refreshToken, expiresIn: successResponse.expiresIn)
-			config.clientID = AuthInformation.PKCEClientID
-			try await populateVariablesForAccessToken()
+			try await completeLogin(successResponse, clientID: AuthInformation.PKCEClientID)
 		} else if let errorResponse = try? JSONDecoder.custom.decode(TokenErrorResponse.self, from: response.data) {
 			logger.error("PKCE token request failed: \(errorResponse.errorDescription, privacy: .public)")
 			throw SessionError.invalidCredentials(description: errorResponse.errorDescription)

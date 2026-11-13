@@ -15,8 +15,9 @@ extension Session {
 		try await authenticatedRequest(method: .get, url: url, parameters: parameters)
 	}
 	
-	func get<Result: Decodable>(url: URL, parameters: [String: String], decoder: JSONDecoder = .custom) async throws -> Result {
-		let response = try await authenticatedRequest(method: .get, url: url, parameters: parameters)
+	/// - Parameter login: The login to use instead of the main one
+	func get<Result: Decodable>(url: URL, parameters: [String: String], login: Config? = nil, decoder: JSONDecoder = .custom) async throws -> Result {
+		let response = try await authenticatedRequest(method: .get, url: url, parameters: parameters, login: login)
 		return try decoder.decode(Result.self, from: response.data)
 	}
 	
@@ -33,15 +34,16 @@ extension Session {
 		try await authenticatedRequest(method: .delete, url: url, parameters: parameters, etag: etag)
 	}
 	
-	private func authenticatedRequest(method: Network.HttpMethod, url: URL, parameters: [String: String], etag: Int? = nil) async throws -> Response {
+	private func authenticatedRequest(method: Network.HttpMethod, url: URL, parameters: [String: String], etag: Int? = nil, login: Config? = nil) async throws -> Response {
+		let login = login ?? config
 		// A failed proactive refresh isn't fatal here: the request itself
 		// surfaces the definitive error (network failure or 401 below)
-		try? await refreshAccessTokenIfNeeded()
-		let response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: config.accessToken, xTidalToken: AuthInformation.apiToken)
+		try? await refreshAccessTokenIfNeeded(of: login)
+		let response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken)
 		guard response.statusCode == 401 else {
 			return response
 		}
-		try await refreshAccessToken()
-		return try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: config.accessToken, xTidalToken: AuthInformation.apiToken)
+		try await refreshAccessToken(of: login)
+		return try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken)
 	}
 }

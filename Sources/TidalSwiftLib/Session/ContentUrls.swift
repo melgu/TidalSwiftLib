@@ -12,17 +12,14 @@ import OSLog
 private let logger = Logger(category: "ContentUrls")
 
 extension Session {
-	/// Whether the login is the PKCE one, which gets Hi-Res, but no Dolby Atmos and no `streamUrl`
-	var isPKCELogin: Bool {
-		config.clientID == AuthInformation.PKCEClientID
-	}
-	
+	/// Only the device login gets `streamUrl`
 	func audioUrl(trackId: Int, audioQuality: AudioQuality) async -> URL? {
+		guard let login = login(.device) else { return nil }
 		var parameters = sessionParameters
 		parameters["soundQuality"] = "\(audioQuality.rawValue)"
 		let url = URL(string: "\(AuthInformation.APILocation)/tracks/\(trackId)/streamUrl")!
 		do {
-			let response: AudioUrl = try await get(url: url, parameters: parameters)
+			let response: AudioUrl = try await get(url: url, parameters: parameters, login: login)
 			
 //			print("""
 //			Track ID: \(response.trackId),
@@ -37,7 +34,9 @@ extension Session {
 	}
 	
 	/// Only unencrypted E-AC-3 streams, which AVFoundation plays directly. Tidal refuses Atmos in offline playback mode.
+	/// Only the device login gets them, the PKCE login gets stereo.
 	func dolbyAtmosUrl(trackId: Int) async -> URL? {
+		guard let login = login(.device) else { return nil }
 		let url = URL(string: "\(AuthInformation.APILocation)/tracks/\(trackId)/playbackinfopostpaywall")!
 		var parameters = sessionParameters
 		parameters["audioquality"] = AudioQuality.high.rawValue
@@ -45,7 +44,7 @@ extension Session {
 		parameters["assetpresentation"] = "FULL"
 		parameters["immersiveaudio"] = "true"
 		do {
-			let response: TrackPlaybackInfo = try await get(url: url, parameters: parameters)
+			let response: TrackPlaybackInfo = try await get(url: url, parameters: parameters, login: login)
 			guard response.audioMode == .dolbyAtmos,
 				  response.manifestMimeType == "application/vnd.tidal.bts",
 				  let decodedManifestData = Data(base64Encoded: response.manifest) else { return nil }
@@ -64,7 +63,8 @@ extension Session {
 		parameters["playbackmode"] = "STREAM"
 		parameters["assetpresentation"] = "FULL"
 		do {
-			let response: VideoPlaybackInfo = try await get(url: url, parameters: parameters)
+			// Videos are only verified with the device login
+			let response: VideoPlaybackInfo = try await get(url: url, parameters: parameters, login: login(.device))
 			guard let decodedManifestData = Data(base64Encoded: response.manifest) else { return nil }
 			let manifest = try JSONDecoder().decode(VideoManifest.self, from: decodedManifestData)
 			guard let streamUrlString = manifest.urls.first else { return nil }
@@ -77,13 +77,14 @@ extension Session {
 	
 	/// The PKCE login gets unencrypted DASH streams in every quality, but `streamUrl` refuses it
 	func dashStream(trackId: Int, audioQuality: AudioQuality) async -> AudioStream? {
+		guard let login = login(.pkce) else { return nil }
 		let url = URL(string: "\(AuthInformation.APILocation)/tracks/\(trackId)/playbackinfopostpaywall")!
 		var parameters = sessionParameters
 		parameters["audioquality"] = audioQuality.rawValue
 		parameters["playbackmode"] = "STREAM"
 		parameters["assetpresentation"] = "FULL"
 		do {
-			let response: TrackPlaybackInfo = try await get(url: url, parameters: parameters)
+			let response: TrackPlaybackInfo = try await get(url: url, parameters: parameters, login: login)
 			guard let manifestData = Data(base64Encoded: response.manifest) else { return nil }
 			var stream: AudioStream
 			switch response.manifestMimeType {

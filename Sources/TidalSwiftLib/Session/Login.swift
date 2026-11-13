@@ -22,18 +22,41 @@ extension Session {
 		try await populateVariablesForAccessToken()
 	}
 	
-	func setAccessToken(_ accessToken: String, refreshToken: String?, expiresIn: Int) {
+	func setAccessToken(_ accessToken: String, refreshToken: String?, expiresIn: Int, in login: Config) {
 		var token = accessToken
 		if !token.hasPrefix("Bearer ") {
 			token = "Bearer " + token
 		}
 		
-		config.accessToken = token
+		login.accessToken = token
 		if let refreshToken {
-			config.refreshToken = refreshToken
+			login.refreshToken = refreshToken
 		}
 		
-		config.tokenExpirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
+		login.tokenExpirationDate = Date().addingTimeInterval(TimeInterval(expiresIn))
+	}
+	
+	/// Stores a new login. Without a login, or replacing one of the same kind, it becomes the main one.
+	/// Otherwise it becomes the second login, which has to belong to the same account.
+	func completeLogin(_ token: TokenSuccessResponse, clientID: String) async throws {
+		let newLogin = Config(accessToken: "", refreshToken: "", clientID: clientID)
+		setAccessToken(token.accessToken, refreshToken: token.refreshToken, expiresIn: token.expiresIn, in: newLogin)
+		
+		if config.isLoggedIn && config.kind != newLogin.kind {
+			guard token.user.userId == userId else {
+				throw SessionError.differentAccount
+			}
+			secondConfig = newLogin
+			saveConfig()
+		} else {
+			config = newLogin
+			try await populateVariablesForAccessToken()
+			// A second login of another account can't stay
+			if let secondConfig, savedSecondCredentials?.userId != userId {
+				logger.notice("Removing the second login (\(String(describing: secondConfig.kind), privacy: .public)), which belongs to another account")
+				removeSecondLogin()
+			}
+		}
 	}
 	
 	public func populateVariablesForAccessToken() async throws {
@@ -83,6 +106,8 @@ extension Session {
 	}
 	
 	/// Runs the device authorization flow. Cancelling the consumer of the stream stops the polling.
+	///
+	/// When logged in with PKCE, this adds the device login as the second one.
 	public func startAuthorization() -> AsyncStream<AuthorizationState> {
 		AsyncStream { continuation in
 			let task = Task {
@@ -141,10 +166,8 @@ extension Session {
 			}
 			
 			if let successResponse = try? JSONDecoder.custom.decode(TokenSuccessResponse.self, from: response.data) {
-				setAccessToken(successResponse.accessToken, refreshToken: successResponse.refreshToken, expiresIn: successResponse.expiresIn)
-				config.clientID = AuthInformation.OAuthClientID
 				do {
-					try await populateVariablesForAccessToken()
+					try await completeLogin(successResponse, clientID: AuthInformation.OAuthClientID)
 					return .success
 				} catch {
 					return .failure(error)
@@ -166,36 +189,41 @@ extension Session {
 		}
 	}
 	
-	/// Refreshes the access token. Concurrent calls share a single refresh
+	/// Refreshes the access token of the main login. Concurrent calls share a single refresh
 	/// request instead of each hitting the auth server.
 	public func refreshAccessToken() async throws {
-		if let activeTokenRefresh {
+		try await refreshAccessToken(of: config)
+	}
+	
+	func refreshAccessToken(of login: Config) async throws {
+		let key = ObjectIdentifier(login)
+		if let activeTokenRefresh = activeTokenRefreshes[key] {
 			return try await activeTokenRefresh.value
 		}
 		let task = Task {
-			defer { activeTokenRefresh = nil }
-			try await performAccessTokenRefresh()
+			defer { activeTokenRefreshes[key] = nil }
+			try await performAccessTokenRefresh(of: login)
 		}
-		activeTokenRefresh = task
+		activeTokenRefreshes[key] = task
 		return try await task.value
 	}
 	
-	private func performAccessTokenRefresh() async throws {
+	private func performAccessTokenRefresh(of login: Config) async throws {
 		logger.debug("refreshAccessToken")
-		guard !config.refreshToken.isEmpty else {
+		guard login.isLoggedIn else {
 			throw SessionError.notLoggedIn
 		}
 		let url = URL(string: "\(AuthInformation.AuthLocation)/token")!
 		var parameters: [String: String] = [
-			"client_id": config.clientID,
-			"refresh_token": config.refreshToken,
+			"client_id": login.clientID,
+			"refresh_token": login.refreshToken,
 			"grant_type": "refresh_token",
 			"scope": AuthInformation.scope
 		]
 		// The built-in clients are confidential: Tidal rejects their refresh requests without the secret
-		if config.clientID == AuthInformation.OAuthClientID {
+		if login.clientID == AuthInformation.OAuthClientID {
 			parameters["client_secret"] = AuthInformation.OAuthClientSecret
-		} else if config.clientID == AuthInformation.PKCEClientID {
+		} else if login.clientID == AuthInformation.PKCEClientID {
 			parameters["client_secret"] = AuthInformation.PKCEClientSecret
 			parameters["scope"] = AuthInformation.PKCEScope
 		}
@@ -210,9 +238,9 @@ extension Session {
 		try Task.checkCancellation()
 		
 		if let successResponse = try? JSONDecoder.custom.decode(TokenSuccessResponse.self, from: response.data) {
-			setAccessToken(successResponse.accessToken, refreshToken: successResponse.refreshToken, expiresIn: successResponse.expiresIn)
+			setAccessToken(successResponse.accessToken, refreshToken: successResponse.refreshToken, expiresIn: successResponse.expiresIn, in: login)
 			saveConfig()
-			logger.debug("Access token refreshed. New expiration: \(self.config.tokenExpirationDate?.description ?? "unknown")")
+			logger.debug("Access token refreshed. New expiration: \(login.tokenExpirationDate?.description ?? "unknown")")
 		} else if let errorResponse = try? JSONDecoder.custom.decode(TokenErrorResponse.self, from: response.data) {
 			throw SessionError.invalidCredentials(description: errorResponse.errorDescription)
 		} else {
@@ -220,25 +248,42 @@ extension Session {
 		}
 	}
 	
-	/// Refreshes the access token if it is expired or about to expire.
+	/// Refreshes the main login's access token if it is expired or about to expire.
 	public func refreshAccessTokenIfNeeded() async throws {
-		guard !config.refreshToken.isEmpty else { return }
-		guard let expirationDate = config.tokenExpirationDate else {
+		try await refreshAccessTokenIfNeeded(of: config)
+	}
+	
+	func refreshAccessTokenIfNeeded(of login: Config) async throws {
+		guard login.isLoggedIn else { return }
+		guard let expirationDate = login.tokenExpirationDate else {
 			// No expiration date recorded — refresh to be safe
-			try await refreshAccessToken()
+			try await refreshAccessToken(of: login)
 			return
 		}
 		if Date() >= expirationDate.addingTimeInterval(-Session.tokenRefreshMargin) {
-			try await refreshAccessToken()
+			try await refreshAccessToken(of: login)
 		}
 	}
 }
 
 extension Session {
+	/// Logs out of both logins
 	public func logout() {
-		activeTokenRefresh?.cancel()
-		activeTokenRefresh = nil
+		for task in activeTokenRefreshes.values {
+			task.cancel()
+		}
+		activeTokenRefreshes = [:]
 		deletePersistentInformation()
 		config = Config(accessToken: "", refreshToken: "", clientID: "")
+		secondConfig = nil
+	}
+	
+	/// Removes the second login, keeping the main one
+	public func removeSecondLogin() {
+		if let secondConfig {
+			activeTokenRefreshes.removeValue(forKey: ObjectIdentifier(secondConfig))?.cancel()
+		}
+		secondConfig = nil
+		deleteSecondCredentials()
 	}
 }

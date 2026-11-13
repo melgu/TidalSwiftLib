@@ -19,4 +19,6 @@ public enum SessionError: Error {
 	case network(underlying: Error)
 	/// Tidal answered in an unexpected format.
 	case unexpectedResponse
+	/// The second login belongs to another account than the main one.
+	case differentAccount
 }

@@ -9,11 +9,15 @@
 import Foundation
 
 public class Session {
+	/// The main login, which all requests use apart from streams the second login is better at
 	public var config: Config
+	/// A login of the other ``LoginKind`` for the same account, so both Hi-Res and Dolby Atmos are available
+	var secondConfig: Config?
 	/// Service name of the Keychain item holding the login
 	let keychainService: String
 	/// What the Keychain holds, to skip unchanged writes
 	var savedCredentials: Credentials?
+	var savedSecondCredentials: Credentials?
 	
 	var countryCode: String?
 	public var userId: Int?
@@ -31,7 +35,8 @@ public class Session {
 	public var favorites: Favorites?
 	public var helpers: Helpers!
 	public var playlistEditing: PlaylistEditing!
-	var activeTokenRefresh: Task<Void, Error>?
+	/// Running refreshes per login, keyed by its `Config`
+	var activeTokenRefreshes: [ObjectIdentifier: Task<Void, Error>] = [:]
 	
 	public init(config: Config?, keychainService: String = Bundle.main.bundleIdentifier ?? "TidalSwift") {
 		self.keychainService = keychainService
@@ -43,6 +48,10 @@ public class Session {
 				savedCredentials = loaded.savedCredentials
 				countryCode = loaded.savedCredentials?.countryCode
 				userId = loaded.savedCredentials?.userId
+				if let second = Config.loadSecond(keychainService: keychainService), second.credentials.userId == userId {
+					secondConfig = second.config
+					savedSecondCredentials = second.credentials
+				}
 			} else {
 				self.config = Config(
 					accessToken: "",

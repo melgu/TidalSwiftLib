@@ -49,7 +49,7 @@ extension Session {
 		return true
 	}
 	
-	/// Saves the whole login: tokens, country and user ID
+	/// Saves both logins: tokens, country and user ID
 	public func saveConfig() {
 		let credentials = Credentials(config: config, countryCode: countryCode, userId: userId)
 		// Never write empty credentials, which would replace a login that just couldn't be read
@@ -59,6 +59,18 @@ extension Session {
 				savedCredentials = credentials
 			} catch {
 				displayError(title: "Couldn't save Login", content: "Couldn't write to Keychain: \(error)")
+			}
+		}
+		
+		if let secondConfig {
+			let secondCredentials = Credentials(config: secondConfig, countryCode: countryCode, userId: userId)
+			if secondCredentials != savedSecondCredentials && !secondCredentials.refreshToken.isEmpty {
+				do {
+					try Keychain.save(JSONEncoder().encode(secondCredentials), service: keychainService, account: secondCredentialsAccount)
+					savedSecondCredentials = secondCredentials
+				} catch {
+					displayError(title: "Couldn't save Second Login", content: "Couldn't write to Keychain: \(error)")
+				}
 			}
 		}
 	}
@@ -71,9 +83,19 @@ extension Session {
 			displayError(title: "Couldn't delete Login", content: "Couldn't remove from Keychain: \(error)")
 		}
 		savedCredentials = nil
+		deleteSecondCredentials()
 		
 		UserDefaults.standard.removeObject(forKey: legacySessionKey)
 		UserDefaults.standard.removeObject(forKey: legacyConfigKey)
+	}
+	
+	func deleteSecondCredentials() {
+		do {
+			try Keychain.delete(service: keychainService, account: secondCredentialsAccount)
+		} catch {
+			displayError(title: "Couldn't delete Second Login", content: "Couldn't remove from Keychain: \(error)")
+		}
+		savedSecondCredentials = nil
 	}
 }
 
@@ -102,6 +124,8 @@ extension Credentials {
 }
 
 private let credentialsAccount = "Credentials"
+/// The second login, of the other kind than the main one
+private let secondCredentialsAccount = "Second Credentials"
 
 /// UserDefaults key older versions stored the country and user ID under
 private let legacySessionKey = "Session Information"
@@ -112,6 +136,24 @@ private let legacyCredentialKeys = ["accessToken", "refreshToken", "clientID", "
 
 extension Config {
 	/// `savedCredentials` is nil if the credentials couldn't be moved to the Keychain
+	/// The second login, which only lives in the Keychain
+	static func loadSecond(keychainService: String) -> (config: Config, credentials: Credentials)? {
+		do {
+			guard let data = try Keychain.load(service: keychainService, account: secondCredentialsAccount) else { return nil }
+			let credentials = try JSONDecoder().decode(Credentials.self, from: data)
+			let config = Config(
+				accessToken: credentials.accessToken,
+				refreshToken: credentials.refreshToken,
+				clientID: credentials.clientID,
+				tokenExpirationDate: credentials.tokenExpirationDate
+			)
+			return (config, credentials)
+		} catch {
+			displayError(title: "Couldn't load Second Login", content: "Couldn't read from Keychain: \(error)")
+			return nil
+		}
+	}
+	
 	static func load(keychainService: String) -> (config: Config, savedCredentials: Credentials?)? {
 		let persistentInformation = UserDefaults.standard.dictionary(forKey: legacyConfigKey) as? [String: String] ?? [:]
 		guard let loaded = loadCredentials(keychainService: keychainService, persistentInformation: persistentInformation) else {
