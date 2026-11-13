@@ -67,7 +67,8 @@ Logged in with the Android client that [tidalapi](https://github.com/EbbLabs/pyt
 - The response carries `bitDepth` and `sampleRate`.
 - A track without the `HIRES_LOSSLESS` tag gets 16/44.1 for `HI_RES_LOSSLESS`.
 - So unencrypted Hi-Res is available, also in offline mode, but only as DASH, which `AVPlayer` can't play. Playing or downloading it means fetching and joining the DASH segments.
-- `HIGH` gives unencrypted AAC-LC (`mp4a.40.2`, ~320 kbit/s) as DASH as well, unlike the Widevine/PlayReady DASH TidalSwift's client gets.
+- `HIGH` gives unencrypted AAC-LC (`mp4a.40.2`, ~320 kbit/s) and `LOW` unencrypted HE-AAC (`mp4a.40.5`, ~97 kbit/s), both 44.1 kHz as DASH, unlike the Widevine/PlayReady DASH TidalSwift's client gets. Both play through `DASHAsset`.
+- Videos: `/videos/{id}/playbackinfo` answers both logins the same way, an unencrypted HLS manifest up to 1080p, which AVPlayer plays.
 - **No Dolby Atmos on v1.** Both Blinding Lights tracks (125155092, Atmos only, and 188600501) return `audioMode: STEREO` FLAC or AAC for every quality, `playbackmode` and `immersiveaudio` value (`true`, `false`, missing). Even the Atmos-only track gets a stereo stream, up to 24 bit / 44.1 kHz. The existing `dolbyAtmosUrl` returns nil.
 - openapi `trackManifests` with `formats=EAC3_JOC` answers 200 for this client (TidalSwift's gets 403 `CLIENT_NOT_ENTITLED`), with an HLS master playlist with `CODECS="ec-3"` at ~770 kbit/s, but FairPlay encrypted (`skd://`), like `FLAC_HIRES`.
 - So this client trades the unencrypted Atmos of TidalSwift's client for unencrypted Hi-Res. Keeping both means two logins, one per client.

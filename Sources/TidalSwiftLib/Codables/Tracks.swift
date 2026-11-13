@@ -91,7 +91,8 @@ public struct Track: Codable, Equatable, Identifiable, Hashable {
 	
 	/// Dolby Atmos is used when preferred or when the track has no stereo version.
 	///
-	/// Dolby Atmos needs the device login, Max the PKCE login. With both, everything else uses the device login.
+	/// Dolby Atmos needs the device login, Max, Low 320 and Low 96 the PKCE login. With both, High uses the device login.
+	/// Without the PKCE login, the device login delivers High instead: it only gets the Low qualities encrypted, and Max as High anyway.
 	public func audioStream(session: Session, audioQuality: AudioQuality, preferDolbyAtmos: Bool) async -> AudioStream? {
 		let logins = session.loginKinds
 		if hasDolbyAtmos && (preferDolbyAtmos || !hasStereo) && logins.contains(.device) {
@@ -100,15 +101,17 @@ public struct Track: Codable, Equatable, Identifiable, Hashable {
 			}
 		}
 		// Tidal sends the PKCE login stereo even for Atmos-only tracks
-		if logins.contains(.pkce) && (audioQuality == .max || !logins.contains(.device) || !hasStereo) {
+		if logins.contains(.pkce) && (audioQuality != .high || !logins.contains(.device) || !hasStereo) {
 			if let stream = await session.dashStream(trackId: id, audioQuality: audioQuality) {
 				return stream
 			}
 		}
-		guard hasStereo, let url = await session.audioUrl(trackId: id, audioQuality: audioQuality) else {
+		guard hasStereo, let (url, deliveredQuality) = await session.audioUrl(trackId: id, audioQuality: .high) else {
 			return nil
 		}
-		return AudioStream(url: url, pathExtension: session.pathExtension(for: audioQuality), isDolbyAtmos: false)
+		var stream = AudioStream(url: url, pathExtension: session.pathExtension(for: .high), isDolbyAtmos: false)
+		stream.audioQuality = deliveredQuality
+		return stream
 	}
 	
 	public func radio(session: Session) async -> [Track]? {

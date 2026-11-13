@@ -13,7 +13,7 @@ private let logger = Logger(category: "ContentUrls")
 
 extension Session {
 	/// Only the device login gets `streamUrl`
-	func audioUrl(trackId: Int, audioQuality: AudioQuality) async -> URL? {
+	func audioUrl(trackId: Int, audioQuality: AudioQuality) async -> (url: URL, quality: AudioQuality)? {
 		guard let login = login(.device) else { return nil }
 		var parameters = sessionParameters
 		parameters["soundQuality"] = "\(audioQuality.rawValue)"
@@ -27,7 +27,7 @@ extension Session {
 //			Codec: \(response.codec)
 //			""")
 			
-			return response.url.upgradedToHTTPS
+			return (response.url.upgradedToHTTPS, response.soundQuality)
 		} catch {
 			return nil
 		}
@@ -63,8 +63,8 @@ extension Session {
 		parameters["playbackmode"] = "STREAM"
 		parameters["assetpresentation"] = "FULL"
 		do {
-			// Videos are only verified with the device login
-			let response: VideoPlaybackInfo = try await get(url: url, parameters: parameters, login: login(.device))
+			// Both logins get the same unencrypted HLS stream in 1080p
+			let response: VideoPlaybackInfo = try await get(url: url, parameters: parameters)
 			guard let decodedManifestData = Data(base64Encoded: response.manifest) else { return nil }
 			let manifest = try JSONDecoder().decode(VideoManifest.self, from: decodedManifestData)
 			guard let streamUrlString = manifest.urls.first else { return nil }
