@@ -8,6 +8,7 @@
 
 import Foundation
 import OSLog
+import RegexBuilder
 
 private let logger = Logger(category: "Network")
 
@@ -38,14 +39,24 @@ extension Network {
 	}
 	
 	#if DEBUG
-	private static let secretKeys = "access_token|refresh_token|id_token|client_secret|device_code|deviceCode|user_code|userCode|code|code_verifier"
-	private static let formSecretRegex = try! NSRegularExpression(pattern: "\\b(\(secretKeys))=[^&]*")
-	private static let jsonSecretRegex = try! NSRegularExpression(pattern: "\"(\(secretKeys))\"\\s*:\\s*\"[^\"]*\"")
+	private static let secretKey = /access_token|refresh_token|id_token|client_secret|device_code|deviceCode|user_code|userCode|code|code_verifier/
+	private static let formSecretRegex = Regex {
+		Anchor.wordBoundary
+		Capture { secretKey }
+		"="
+		/[^&]*/
+	}
+	private static let jsonSecretRegex = Regex {
+		"\""
+		Capture { secretKey }
+		/"\s*:\s*"[^"]*"/
+	}
 	
 	/// Blanks secrets in form-encoded request bodies and JSON responses, so they can be logged
 	static func redactingSecrets(_ string: String) -> String {
-		let formRedacted = formSecretRegex.stringByReplacingMatches(in: string, range: NSRange(string.startIndex..., in: string), withTemplate: "$1=<redacted>")
-		return jsonSecretRegex.stringByReplacingMatches(in: formRedacted, range: NSRange(formRedacted.startIndex..., in: formRedacted), withTemplate: "\"$1\":\"<redacted>\"")
+		string
+			.replacing(formSecretRegex) { "\($0.1)=<redacted>" }
+			.replacing(jsonSecretRegex) { "\"\($0.1)\":\"<redacted>\"" }
 	}
 	#endif
 	
