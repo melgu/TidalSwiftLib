@@ -33,7 +33,8 @@ extension Network {
 		let queryItems = parameters.map { URLQueryItem(name: $0, value: $1) }
 		var components = URLComponents()
 		components.queryItems = queryItems
-		return components.percentEncodedQuery ?? ""
+		// URLComponents leaves + as is, which servers decode as a space. Every + left is part of a name or value.
+		return components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B") ?? ""
 	}
 	
 	#if DEBUG

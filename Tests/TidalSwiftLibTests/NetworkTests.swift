@@ -33,10 +33,11 @@ struct NetworkTests {
 	}
 	
 	@Test func encodesPlusSign() {
-		withKnownIssue("URLComponents leaves + unencoded, which servers decode as a space") {
-			let parameters = ["query": "C++", "title": "Rock + Roll"]
-			#expect(decodedQuery(Network.encodeParameters(parameters)) == parameters)
-		}
+		let parameters = ["query": "C++", "title": "Rock + Roll", "a+b": "1"]
+		let query = Network.encodeParameters(parameters)
+		
+		#expect(!query.contains("+"))
+		#expect(decodedQuery(query) == parameters)
 	}
 	
 	#if DEBUG
