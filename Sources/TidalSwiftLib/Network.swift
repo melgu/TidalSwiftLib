@@ -29,7 +29,7 @@ extension Network {
 		case delete
 	}
 	
-	private static func encodeParameters(_ parameters: [String: String]) -> String {
+	static func encodeParameters(_ parameters: [String: String]) -> String {
 		let queryItems = parameters.map { URLQueryItem(name: $0, value: $1) }
 		var components = URLComponents()
 		components.queryItems = queryItems
@@ -42,7 +42,7 @@ extension Network {
 	private static let jsonSecretRegex = try! NSRegularExpression(pattern: "\"(\(secretKeys))\"\\s*:\\s*\"[^\"]*\"")
 	
 	/// Blanks secrets in form-encoded request bodies and JSON responses, so they can be logged
-	private static func redactingSecrets(_ string: String) -> String {
+	static func redactingSecrets(_ string: String) -> String {
 		let formRedacted = formSecretRegex.stringByReplacingMatches(in: string, range: NSRange(string.startIndex..., in: string), withTemplate: "$1=<redacted>")
 		return jsonSecretRegex.stringByReplacingMatches(in: formRedacted, range: NSRange(formRedacted.startIndex..., in: formRedacted), withTemplate: "\"$1\":\"<redacted>\"")
 	}

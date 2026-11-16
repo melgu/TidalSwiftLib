@@ -2,6 +2,15 @@
 
 import PackageDescription
 
+let swiftSettings: [SwiftSetting] = [
+	.defaultIsolation(MainActor.self),
+	.enableUpcomingFeature("DisableOutwardActorInference"),
+	.enableUpcomingFeature("GlobalActorIsolatedTypesUsability"),
+	.enableUpcomingFeature("InferIsolatedConformances"),
+	.enableUpcomingFeature("InferSendableFromCaptures"),
+	.enableUpcomingFeature("NonisolatedNonsendingByDefault")
+]
+
 let package = Package(
 	name: "TidalSwiftLib",
 	platforms: [
@@ -14,14 +23,12 @@ let package = Package(
 	targets: [
 		.target(
 			name: "TidalSwiftLib",
-			swiftSettings: [
-				.defaultIsolation(MainActor.self),
-				.enableUpcomingFeature("DisableOutwardActorInference"),
-				.enableUpcomingFeature("GlobalActorIsolatedTypesUsability"),
-				.enableUpcomingFeature("InferIsolatedConformances"),
-				.enableUpcomingFeature("InferSendableFromCaptures"),
-				.enableUpcomingFeature("NonisolatedNonsendingByDefault")
-			]
+			swiftSettings: swiftSettings
+		),
+		.testTarget(
+			name: "TidalSwiftLibTests",
+			dependencies: ["TidalSwiftLib"],
+			swiftSettings: swiftSettings
 		)
 	]
 )
