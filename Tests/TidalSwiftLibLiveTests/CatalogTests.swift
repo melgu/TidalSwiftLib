@@ -125,8 +125,10 @@ extension LiveTests {
 		@Test func radio() async throws {
 			let session = try await LiveSession.session()
 			let tracks = try #require(await session.artistRadio(artistId: TestItems.artistId))
-			
 			#expect(!tracks.isEmpty)
+			
+			let page = try #require(await session.artistRadio(artistId: TestItems.artistId, limit: 10, offset: 10))
+			#expect(page.count == 10)
 		}
 	}
 	
