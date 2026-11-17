@@ -89,8 +89,9 @@ extension LiveTests {
 		
 		@Test func featured() async throws {
 			let session = try await LiveSession.session()
+			let items = try #require(await session.featured())
 			
-			#expect(await session.featured() != nil)
+			#expect(!items.isEmpty)
 		}
 		
 		@Test func moods() async throws {

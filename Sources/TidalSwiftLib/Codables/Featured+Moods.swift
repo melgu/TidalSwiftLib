@@ -32,6 +32,32 @@ struct FeaturedItems: Decodable {
 	let offset: Int
 	let totalNumberOfItems: Int
 	let items: [FeaturedItem]
+	
+	private enum CodingKeys: String, CodingKey {
+		case limit, offset, totalNumberOfItems, items
+	}
+	
+	/// Any JSON object, to step over an item that can't be decoded
+	private struct SkippedItem: Decodable {}
+	
+	init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: CodingKeys.self)
+		limit = try container.decode(Int.self, forKey: .limit)
+		offset = try container.decode(Int.self, forKey: .offset)
+		totalNumberOfItems = try container.decode(Int.self, forKey: .totalNumberOfItems)
+		
+		// Skips items of types Tidal adds later, instead of losing the whole list
+		var itemsContainer = try container.nestedUnkeyedContainer(forKey: .items)
+		var items: [FeaturedItem] = []
+		while !itemsContainer.isAtEnd {
+			if let item = try? itemsContainer.decode(FeaturedItem.self) {
+				items.append(item)
+			} else {
+				_ = try itemsContainer.decode(SkippedItem.self)
+			}
+		}
+		self.items = items
+	}
 }
 
 public enum FeaturedType: String, Decodable {
@@ -40,6 +66,7 @@ public enum FeaturedType: String, Decodable {
 	case video = "VIDEO"
 	case playlist = "PLAYLIST"
 	case album = "ALBUM"
+	case artist = "ARTIST"
 }
 
 public struct FeaturedItem: Decodable {
