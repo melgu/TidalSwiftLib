@@ -29,6 +29,11 @@ let package = Package(
 			name: "TidalSwiftLibTests",
 			dependencies: ["TidalSwiftLib"],
 			swiftSettings: swiftSettings
+		),
+		.testTarget(
+			name: "TidalSwiftLibLiveTests",
+			dependencies: ["TidalSwiftLib"],
+			swiftSettings: swiftSettings
 		)
 	]
 )

@@ -27,8 +27,12 @@ The package has no dependencies.
   Build the library.
 - `xcodebuild -scheme TidalSwiftLib -destination 'platform=macOS' build`
   Build it with Xcode's toolchain, as the app does.
-- `swift test`
+- `swift test --filter TidalSwiftLibTests`
   Run the unit tests in `Tests/TidalSwiftLibTests` (Swift Testing). They cover logic that needs no network: link parsing, the HLS and DASH parsers, parameter encoding, secret redaction, the PKCE setup and the tag writers. Internal API is reached with `@testable import`.
+- `swift test --filter TidalSwiftLibLiveTests`
+  Run the tests in `Tests/TidalSwiftLibLiveTests` against the real Tidal API, to notice when it changes. They need a login: the first run copies the command line tool's login (`tidal login`) to its own Keychain item, `de.melgu.TidalSwiftLib.tests`, which macOS asks to allow once. Delete that item to copy the login again. Tests that change the account are prepared in `WritingTests.swift`, but disabled.
+
+Plain `swift test` runs both targets, so pass a filter to leave out the live tests, which need the network and take a few seconds.
 
 To work on the library together with the app or the command line tool, clone the repos next to each other. Dragging this folder into the TidalSwift Xcode project uses it in place of the released version; the command line tool's `Package.swift` can point to `../TidalSwiftLib` with `.package(path:)`.
 

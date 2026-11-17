@@ -123,9 +123,9 @@ extension Credentials {
 	}
 }
 
-private let credentialsAccount = "Credentials"
+let credentialsAccount = "Credentials"
 /// The second login, of the other kind than the main one
-private let secondCredentialsAccount = "Second Credentials"
+let secondCredentialsAccount = "Second Credentials"
 
 /// UserDefaults key older versions stored the country and user ID under
 private let legacySessionKey = "Session Information"
