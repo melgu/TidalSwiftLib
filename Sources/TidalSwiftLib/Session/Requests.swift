@@ -10,6 +10,8 @@ import Foundation
 
 // Authenticated requests. These refresh the access token beforehand when it is
 // expired (or about to expire) and retry once if the server rejects it anyway.
+// They throw a RequestError when Tidal rejects the request, so a function that
+// ignores the response can't take a rejected change for a successful one.
 extension Session {
 	func get(url: URL, parameters: [String: String]) async throws -> Response {
 		try await authenticatedRequest(method: .get, url: url, parameters: parameters)
@@ -39,11 +41,14 @@ extension Session {
 		// A failed proactive refresh isn't fatal here: the request itself
 		// surfaces the definitive error (network failure or 401 below)
 		try? await refreshAccessTokenIfNeeded(of: login)
-		let response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken)
-		guard response.statusCode == 401 else {
-			return response
+		var response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken, transport: transport)
+		if response.statusCode == 401 {
+			try await refreshAccessToken(of: login)
+			response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken, transport: transport)
 		}
-		try await refreshAccessToken(of: login)
-		return try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken)
+		guard response.isSuccess else {
+			throw RequestError(statusCode: response.statusCode ?? 0, body: response.data)
+		}
+		return response
 	}
 }

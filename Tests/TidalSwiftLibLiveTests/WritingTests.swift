@@ -83,6 +83,35 @@ extension LiveTests {
 			}
 		}
 		
+		/// Tidal answers 404 and adds none of the IDs
+		@Test func addUnknownTrack() async throws {
+			try await withTemporaryPlaylist { session, playlist in
+				#expect(await session.playlistEditing.addTracks([TestItems.trackId, 999_999_999], to: playlist.uuid, duplicate: false) == false)
+				#expect(await session.playlistItems(playlistId: playlist.uuid)?.isEmpty == true)
+			}
+		}
+		
+		/// Tidal rejects these with a status code, which the functions report
+		@Test func rejectedEdits() async throws {
+			try await withTemporaryPlaylist { session, playlist in
+				#expect(await session.playlistEditing.addTrack(TestItems.trackId, to: playlist.uuid, duplicate: false))
+				#expect(await session.playlistEditing.removeItem(atIndex: 5, from: playlist.uuid) == false)
+				#expect(await session.playlistEditing.moveItem(fromIndex: 5, toIndex: 0, in: playlist.uuid) == false)
+				#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [TestItems.trackId])
+			}
+			let session = try await LiveSession.session()
+			let missingPlaylist = "00000000-0000-4000-8000-000000000000"
+			#expect(await session.playlistEditing.edit(playlistId: missingPlaylist, title: "Title", description: "") == false)
+			#expect(await session.playlistEditing.delete(playlistId: missingPlaylist) == false)
+			
+			let favorites = try #require(session.favorites)
+			let added = await favorites.addTrack(trackId: 999_999_999)
+			if added {
+				await favorites.removeTrack(trackId: 999_999_999)
+			}
+			#expect(added == false)
+		}
+		
 		/// Toggles a favorite twice, so it ends as it was. An existing favorite loses its original date.
 		@Test func toggleFavoriteTrack() async throws {
 			let session = try await LiveSession.session()

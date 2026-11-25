@@ -16,6 +16,43 @@ struct Response {
 	let data: Data
 	let statusCode: Int?
 	let etag: Int?
+	
+	/// Requests that Tidal rejects still return a response, e.g. 404 for an unknown track
+	var isSuccess: Bool {
+		statusCode.map { (200..<300).contains($0) } ?? false
+	}
+}
+
+/// Sends a request. Tests pass one that answers without the network.
+typealias HTTPTransport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
+
+/// Tidal rejected a request, e.g. with 404 for an ID it doesn't know
+nonisolated public struct RequestError: Error, Equatable, CustomStringConvertible {
+	public let statusCode: Int
+	/// Tidal's more specific code, e.g. 2001 for a resource it doesn't have
+	public let subStatus: Int?
+	/// Tidal's explanation, e.g. "Track not found"
+	public let userMessage: String?
+	
+	init(statusCode: Int, subStatus: Int? = nil, userMessage: String? = nil) {
+		self.statusCode = statusCode
+		self.subStatus = subStatus
+		self.userMessage = userMessage
+	}
+	
+	/// Reads Tidal's error body, `{ "status": 404, "subStatus": 2001, "userMessage": "Track not found" }`, if there is one
+	init(statusCode: Int, body: Data) {
+		struct Body: Decodable {
+			let subStatus: Int?
+			let userMessage: String?
+		}
+		let decoded = try? JSONDecoder().decode(Body.self, from: body)
+		self.init(statusCode: statusCode, subStatus: decoded?.subStatus, userMessage: decoded?.userMessage)
+	}
+	
+	public var description: String {
+		"Tidal answered \(statusCode)" + (userMessage.map { ": \($0)" } ?? "")
+	}
 }
 
 public enum Network {}
@@ -60,7 +97,11 @@ extension Network {
 	}
 	#endif
 	
-	static func request(method: HttpMethod, url: URL, parameters: [String: String], etag: Int? = nil, accessToken: String?, xTidalToken: String?) async throws -> Response {
+	static let urlSessionTransport: HTTPTransport = { request in
+		try await URLSession.shared.data(for: request)
+	}
+	
+	static func request(method: HttpMethod, url: URL, parameters: [String: String], etag: Int? = nil, accessToken: String?, xTidalToken: String?, transport: HTTPTransport = urlSessionTransport) async throws -> Response {
 		var request = URLRequest(url: url)
 		request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 		if let accessToken = accessToken {
@@ -98,7 +139,7 @@ extension Network {
 		}
 		#endif
 		
-		let (data, response) = try await URLSession.shared.data(for: request)
+		let (data, response) = try await transport(request)
 		
 		let statusCode = (response as? HTTPURLResponse)?.statusCode
 		

@@ -37,6 +37,8 @@ public class Session {
 	public var playlistEditing: PlaylistEditing!
 	/// Running refreshes per login, keyed by its `Config`
 	var activeTokenRefreshes: [ObjectIdentifier: Task<Void, Error>] = [:]
+	/// Sends the authenticated requests. Tests replace it to answer without the network.
+	var transport: HTTPTransport = Network.urlSessionTransport
 	
 	public init(config: Config?, keychainService: String = Bundle.main.bundleIdentifier ?? "TidalSwift") {
 		self.keychainService = keychainService

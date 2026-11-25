@@ -18,3 +18,4 @@ Findings from probing the v1 playlist endpoints (November 2026) with a temporary
 - `POST /playlists/{uuid}/items` with `trackIds` takes video IDs too, since tracks and videos share one number space.
 - Positions for `DELETE /playlists/{uuid}/items/{index}` and `POST /playlists/{uuid}/items/{index}?toIndex=` count videos.
 - `toIndex` is the position the item ends up at: moving index 0 of `[a, b, c, a]` to 2 gives `[b, c, a, a]`.
+- Tidal answers a rejected change with a status code, not a network error, so the library checks it. A single ID Tidal doesn't know fails the whole `POST /playlists/{uuid}/items` with `404` "Track not found", and none of the IDs are added. Some tracks that can't be streamed (`allowStreaming: false`) are still accepted, others not, and `GET /tracks/{id}` answers `404` for both, so it can't tell beforehand which IDs will fail.

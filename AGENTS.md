@@ -13,7 +13,7 @@ Changes to the public API affect the app, the command line tool and outside user
 
 ## Architecture
 
-**Networking (`Network.swift`):** Async/await HTTP client supporting GET/POST/DELETE. All Tidal API calls go through `Session` (`Session/Session.swift`), which holds auth state and constructs requests. The login (tokens and client ID) is stored in the login keychain through `Keychain.swift`, not UserDefaults, under the `keychainService` passed to `Session`. API credentials live in `Config.swift` — treat these as sensitive.
+**Networking (`Network.swift`):** Async/await HTTP client supporting GET/POST/DELETE. All Tidal API calls go through `Session` (`Session/Session.swift`), which holds auth state and constructs requests. Its requests (`Session/Requests.swift`) throw a `RequestError` when Tidal answers with a status other than 2xx, so a function that ignores the response still notices a rejected change. The login (tokens and client ID) is stored in the login keychain through `Keychain.swift`, not UserDefaults, under the `keychainService` passed to `Session`. API credentials live in `Config.swift` — treat these as sensitive.
 
 **Downloads (`Download.swift`):** Downloads tracks, albums, artists, playlists and videos into the destination given by `DownloadOptions`, which also sets audio quality and Dolby Atmos. `Metadata` tags downloaded tracks without dependencies: `FLACTagWriter` writes Vorbis comment and picture blocks, `MP4TagWriter` uses an AVFoundation passthrough export.
 
@@ -28,7 +28,7 @@ The package has no dependencies.
 - `xcodebuild -scheme TidalSwiftLib -destination 'platform=macOS' build`
   Build it with Xcode's toolchain, as the app does.
 - `swift test --filter TidalSwiftLibTests`
-  Run the unit tests in `Tests/TidalSwiftLibTests` (Swift Testing). They cover logic that needs no network: link parsing, the HLS and DASH parsers, parameter encoding, secret redaction, the PKCE setup and the tag writers. Internal API is reached with `@testable import`.
+  Run the unit tests in `Tests/TidalSwiftLibTests` (Swift Testing). They cover logic that needs no network: link parsing, the HLS and DASH parsers, parameter encoding, secret redaction, the PKCE setup and the tag writers. Requests are tested by giving a `Session` a fake `transport` that answers without the network, e.g. with the status codes Tidal rejects a change with (`RejectedRequestTests.swift`). Internal API is reached with `@testable import`.
 - `swift test --filter TidalSwiftLibLiveTests`
   Run the tests in `Tests/TidalSwiftLibLiveTests` against the real Tidal API, to notice when it changes. They need a login: the first run copies the command line tool's login (`tidal login`) to its own Keychain item, `de.melgu.TidalSwiftLib.tests`, which macOS asks to allow once. Delete that item to copy the login again. Tests that change the account are prepared in `WritingTests.swift`, but disabled.
 
