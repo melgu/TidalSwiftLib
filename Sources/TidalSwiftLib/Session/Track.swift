@@ -27,6 +27,20 @@ extension Session {
 		}
 	}
 	
+	/// The tracks of a recording, e.g. on its album and on compilations. Also finds a track again after Tidal replaced its ID.
+	/// - Parameter isrc: The recording's International Standard Recording Code, see ``Track/isrc``
+	public func tracks(isrc: String) async -> [Track]? {
+		let url = URL(string: "\(AuthInformation.APILocation)/tracks")!
+		var parameters = sessionParameters
+		parameters["isrc"] = isrc
+		do {
+			let response: Tracks = try await get(url: url, parameters: parameters)
+			return response.items
+		} catch {
+			return nil
+		}
+	}
+	
 	public func trackCredits(trackId: Int) async -> [Credit]? {
 		let url = URL(string: "\(AuthInformation.APILocation)/tracks/\(trackId)/credits")!
 		do {

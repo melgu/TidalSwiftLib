@@ -9,7 +9,7 @@
 import Foundation
 
 public class PlaylistEditing {
-	private unowned let session: Session
+	unowned let session: Session
 	private let baseUrl: String
 	
 	init(session: Session) {
@@ -28,21 +28,31 @@ public class PlaylistEditing {
 	}
 	
 	/// - Parameter trackIds: Track or video IDs, as Tidal takes both
+	/// - Returns: False also if Tidal doesn't know one of the IDs, which fails the whole request
 	public func addTracks(_ trackIds: [Int], to playlistId: String, duplicate: Bool) async -> Bool {
+		await add(trackIds, to: playlistId, duplicate: duplicate) == .added
+	}
+	
+	enum AddOutcome {
+		case added
+		/// Tidal doesn't know one of the IDs, and added none of them
+		case notFound
+		case failed
+	}
+	
+	func add(_ ids: [Int], to playlistId: String, duplicate: Bool) async -> AddOutcome {
 		let url = URL(string: "\(baseUrl)/\(playlistId)/items")!
 		var parameters = session.sessionParameters
-		var trackIdsString = ""
-		for id in trackIds {
-			trackIdsString += "\(id),"
-		}
-		trackIdsString = String(trackIdsString.dropLast())
-		parameters["trackIds"] = trackIdsString
+		parameters["trackIds"] = ids.map(String.init).joined(separator: ",")
+		// Without duplicates, Tidal leaves out the IDs already in the playlist and adds the others
 		parameters["onDupes"] = duplicate ? "ADD" : "FAIL"
 		do {
 			_ = try await session.post(url: url, parameters: parameters, etag: etag(for: playlistId))
-			return true
+			return .added
+		} catch let error as RequestError where error.statusCode == 404 {
+			return .notFound
 		} catch {
-			return false
+			return .failed
 		}
 	}
 	
@@ -61,6 +71,24 @@ public class PlaylistEditing {
 		} catch {
 			return false
 		}
+	}
+	
+	/// Removes several items with few requests
+	/// - Parameter indices: Positions before the removal, starting at 0
+	/// - Returns: False if a request failed. The items of the requests before it are removed by then.
+	public func removeItems(atIndices indices: [Int], from playlistId: String) async -> Bool {
+		// From the back, so the positions of the later requests stay the same
+		let sorted = Set(indices).sorted(by: >)
+		for start in stride(from: 0, to: sorted.count, by: 500) {
+			let chunk = sorted[start..<min(start + 500, sorted.count)].sorted()
+			let url = URL(string: "\(baseUrl)/\(playlistId)/items/\(chunk.map(String.init).joined(separator: ","))")!
+			do {
+				_ = try await session.delete(url: url, parameters: session.sessionParameters, etag: etag(for: playlistId))
+			} catch {
+				return false
+			}
+		}
+		return true
 	}
 	
 	/// - Parameter toIndex: The position the item ends up at, e.g. 2 moves the first of `[a, b, c]` to the end

@@ -39,6 +39,17 @@ extension Session {
 		return await allPlaylistPages(PlaylistItems.self, url: url, pageSize: 100)
 	}
 	
+	/// Any playlist, also one of someone else, e.g. to import it as a copy of one's own
+	public func exportPlaylist(playlistId: String) async -> PlaylistExport? {
+		guard let playlist = await playlist(playlistId: playlistId) else {
+			return nil
+		}
+		guard let items = await playlistItems(playlistId: playlistId) else {
+			return nil
+		}
+		return PlaylistExport(playlist: playlist, items: items)
+	}
+	
 	private func allPlaylistPages<Page: PagedList>(_ pageType: Page.Type, url: URL, pageSize: Int) async -> [Page.Item]? {
 		var items: [Page.Item] = []
 		var offset = 0

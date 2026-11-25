@@ -96,6 +96,7 @@ extension LiveTests {
 			try await withTemporaryPlaylist { session, playlist in
 				#expect(await session.playlistEditing.addTrack(TestItems.trackId, to: playlist.uuid, duplicate: false))
 				#expect(await session.playlistEditing.removeItem(atIndex: 5, from: playlist.uuid) == false)
+				#expect(await session.playlistEditing.removeItems(atIndices: [0, 5], from: playlist.uuid) == false)
 				#expect(await session.playlistEditing.moveItem(fromIndex: 5, toIndex: 0, in: playlist.uuid) == false)
 				#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [TestItems.trackId])
 			}
@@ -110,6 +111,60 @@ extension LiveTests {
 				await favorites.removeTrack(trackId: 999_999_999)
 			}
 			#expect(added == false)
+		}
+		
+		@Test func removeSeveralItems() async throws {
+			try await withTemporaryPlaylist { session, playlist in
+				let albumTracks = try #require(await session.albumTracks(albumId: TestItems.albumId))
+				let trackIds = albumTracks.prefix(4).map(\.id)
+				#expect(await session.playlistEditing.addTracks(trackIds, to: playlist.uuid, duplicate: false))
+				
+				#expect(await session.playlistEditing.removeItems(atIndices: [3, 0, 2], from: playlist.uuid))
+				#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [trackIds[1]])
+			}
+		}
+		
+		/// Imports a playlist as a new one, appends it to itself without duplicates and replaces it with another file
+		@Test func importPlaylist() async throws {
+			let session = try await LiveSession.session()
+			let source = try #require(await session.exportPlaylist(playlistId: TestItems.playlistId))
+			let imported = try await session.playlistEditing.importPlaylist(source, mode: .new)
+			do {
+				try await checkImports(into: imported, from: source, session: session)
+			} catch {
+				_ = await session.playlistEditing.delete(playlistId: imported.playlist.uuid)
+				throw error
+			}
+			#expect(await session.playlistEditing.delete(playlistId: imported.playlist.uuid))
+		}
+		
+		private func checkImports(into imported: PlaylistImportResult, from source: PlaylistExport, session: Session) async throws {
+			#expect(imported.playlist.title == source.title)
+			#expect(imported.added.map(\.id) == source.items.map(\.id))
+			#expect(imported.missing.isEmpty)
+			#expect(await session.playlistItems(playlistId: imported.playlist.uuid)?.map(\.mediaId) == source.items.map(\.id))
+			
+			let appended = try await session.playlistEditing.importPlaylist(source, mode: .append(playlistId: imported.playlist.uuid, duplicates: false))
+			#expect(appended.added.isEmpty)
+			#expect(appended.skipped.count == source.items.count)
+			
+			// A track whose ID Tidal no longer knows, and one it can't find again
+			let track = try #require(await session.track(trackId: TestItems.trackId))
+			let replacement = try PlaylistExport(data: source.data().replacing(
+				Data(#""items" : ["#.utf8),
+				with: Data("""
+					"items" : [
+						{ "type" : "track", "id" : 999999998, "title" : "\(track.title)", "artists" : [], "isrc" : "\(track.isrc ?? "")", "duration" : \(track.duration) },
+						{ "type" : "video", "id" : 999999999, "title" : "Gone", "artists" : [], "duration" : 100 },
+					""".utf8)
+			))
+			let replaced = try await session.playlistEditing.importPlaylist(replacement, mode: .replace(playlistId: imported.playlist.uuid))
+			#expect(replaced.replaced.map(\.original.id) == [999_999_998])
+			#expect(replaced.replaced.first?.track.isrc == track.isrc)
+			#expect(replaced.missing.map(\.id) == [999_999_999])
+			let items = try #require(await session.playlistItems(playlistId: imported.playlist.uuid))
+			#expect(items.count == source.items.count + 1)
+			#expect(items.first?.mediaId == replaced.replaced.first?.track.id)
 		}
 		
 		/// Toggles a favorite twice, so it ends as it was. An existing favorite loses its original date.

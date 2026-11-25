@@ -171,6 +171,28 @@ extension LiveTests {
 			#expect(tracks.count == items.count)
 			#expect(Set(items.map(\.id)).count == items.count)
 		}
+		
+		@Test func export() async throws {
+			let session = try await LiveSession.session()
+			let export = try #require(await session.exportPlaylist(playlistId: TestItems.playlistId))
+			let items = try #require(await session.playlistItems(playlistId: TestItems.playlistId))
+			
+			#expect(export.uuid == TestItems.playlistId)
+			#expect(export.items.map(\.id) == items.map(\.mediaId))
+			#expect(export.items.allSatisfy { $0.type == .video || $0.isrc != nil })
+			#expect(try PlaylistExport(data: export.data()).items.count == items.count)
+		}
+		
+		/// Finds a track again by its recording
+		@Test func tracksByIsrc() async throws {
+			let session = try await LiveSession.session()
+			let track = try #require(await session.track(trackId: TestItems.trackId))
+			let isrc = try #require(track.isrc)
+			let tracks = try #require(await session.tracks(isrc: isrc))
+			
+			#expect(tracks.contains { $0.id == track.id })
+			#expect(tracks.allSatisfy { $0.isrc == isrc })
+		}
 	}
 	
 	@Suite struct Videos {

@@ -84,6 +84,7 @@ struct RejectedRequestTests {
 		let editing = session.playlistEditing!
 		#expect(await editing.addTracks([1, 2], to: "playlist", duplicate: false))
 		#expect(await editing.removeItem(atIndex: 0, from: "playlist"))
+		#expect(await editing.removeItems(atIndices: [0, 1], from: "playlist"))
 		#expect(await editing.moveItem(fromIndex: 0, toIndex: 1, in: "playlist"))
 		#expect(await editing.edit(playlistId: "playlist", title: "Title", description: ""))
 		#expect(await editing.delete(playlistId: "playlist"))
@@ -96,9 +97,30 @@ struct RejectedRequestTests {
 		let editing = session.playlistEditing!
 		#expect(await editing.addTracks([1, 2], to: "playlist", duplicate: false) == false)
 		#expect(await editing.removeItem(atIndex: 0, from: "playlist") == false)
+		#expect(await editing.removeItems(atIndices: [0, 1], from: "playlist") == false)
 		#expect(await editing.moveItem(fromIndex: 0, toIndex: 1, in: "playlist") == false)
 		#expect(await editing.edit(playlistId: "playlist", title: "Title", description: "") == false)
 		#expect(await editing.delete(playlistId: "playlist") == false)
+	}
+	
+	/// Import tells unknown IDs, which it looks for, from other failures, which stop it
+	@Test func addTellsUnknownIdsFromFailures() async {
+		let editing = session.playlistEditing!
+		fake.answer("POST", 404, body: Self.notFound)
+		#expect(await editing.add([1], to: "playlist", duplicate: true) == .notFound)
+		fake.answer("POST", 500)
+		#expect(await editing.add([1], to: "playlist", duplicate: true) == .failed)
+		fake.answer("POST", 200)
+		#expect(await editing.add([1], to: "playlist", duplicate: true) == .added)
+	}
+	
+	@Test func removeItemsSendsPositionsFromTheBack() async {
+		let editing = session.playlistEditing!
+		#expect(await editing.removeItems(atIndices: Array(0..<600) + [5], from: "playlist"))
+		let deletes = fake.requests.filter { $0.httpMethod == "DELETE" }.map { $0.url!.path() }
+		#expect(deletes.count == 2)
+		#expect(deletes.first?.hasPrefix("/v1/playlists/playlist/items/100,101,") == true)
+		#expect(deletes.last?.hasSuffix("/items/" + (0..<100).map(String.init).joined(separator: ",")) == true)
 	}
 	
 	@Test func favoritesFail() async {
