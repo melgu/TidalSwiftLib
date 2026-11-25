@@ -24,13 +24,39 @@ extension Session {
 		}
 	}
 	
+	/// The tracks of a playlist. Tidal returns each video as its "Audio from video" track,
+	/// so the positions match those of ``playlistItems(playlistId:)``.
 	public func playlistTracks(playlistId: String) async -> [Track]? {
 		let url = URL(string: "\(AuthInformation.APILocation)/playlists/\(playlistId)/tracks")!
-		do {
-			let response: Tracks = try await get(url: url, parameters: sessionParameters)
-			return response.items
-		} catch {
-			return nil
+		return await allPlaylistPages(Tracks.self, url: url, pageSize: 999)
+	}
+	
+	/// The tracks and videos of a playlist, in the order of the positions that
+	/// ``PlaylistEditing/removeItem(atIndex:from:)`` and ``PlaylistEditing/moveItem(fromIndex:toIndex:in:)`` take
+	public func playlistItems(playlistId: String) async -> [PlaylistItem]? {
+		let url = URL(string: "\(AuthInformation.APILocation)/playlists/\(playlistId)/items")!
+		// Maximum of 100 allowed by Tidal
+		return await allPlaylistPages(PlaylistItems.self, url: url, pageSize: 100)
+	}
+	
+	private func allPlaylistPages<Page: PagedList>(_ pageType: Page.Type, url: URL, pageSize: Int) async -> [Page.Item]? {
+		var items: [Page.Item] = []
+		var offset = 0
+		while true {
+			var parameters = sessionParameters
+			parameters["limit"] = "\(pageSize)"
+			parameters["offset"] = "\(offset)"
+			do {
+				let page: Page = try await get(url: url, parameters: parameters)
+				items += page.items
+				// Tidal may use a smaller page size than asked for
+				offset += max(page.limit, 1)
+				if offset >= page.totalNumberOfItems {
+					return items
+				}
+			} catch {
+				return nil
+			}
 		}
 	}
 }

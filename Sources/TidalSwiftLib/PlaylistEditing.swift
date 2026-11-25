@@ -27,6 +27,7 @@ public class PlaylistEditing {
 		}
 	}
 	
+	/// - Parameter trackIds: Track or video IDs, as Tidal takes both
 	public func addTracks(_ trackIds: [Int], to playlistId: String, duplicate: Bool) async -> Bool {
 		let url = URL(string: "\(baseUrl)/\(playlistId)/items")!
 		var parameters = session.sessionParameters

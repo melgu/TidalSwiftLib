@@ -63,6 +63,26 @@ extension LiveTests {
 			}
 		}
 		
+		/// Videos take positions like tracks. The track list has their "Audio from video" track in their place.
+		@Test func addAndRemoveVideo() async throws {
+			try await withTemporaryPlaylist { session, playlist in
+				let trackIds = [TestItems.trackId, TestItems.lyricsTrackId]
+				#expect(await session.playlistEditing.addTrack(trackIds[0], to: playlist.uuid, duplicate: false))
+				#expect(await session.playlistEditing.addTrack(TestItems.videoId, to: playlist.uuid, duplicate: false))
+				#expect(await session.playlistEditing.addTrack(trackIds[1], to: playlist.uuid, duplicate: false))
+				
+				let items = try #require(await session.playlistItems(playlistId: playlist.uuid))
+				#expect(items.map(\.track?.id) == [trackIds[0], nil, trackIds[1]])
+				#expect(items[1].video?.id == TestItems.videoId)
+				let tracks = try #require(await session.playlistTracks(playlistId: playlist.uuid))
+				#expect(tracks.count == 3)
+				
+				#expect(await session.playlistEditing.removeItem(atIndex: 1, from: playlist.uuid))
+				let remaining = try #require(await session.playlistItems(playlistId: playlist.uuid))
+				#expect(remaining.map(\.track?.id) == trackIds)
+			}
+		}
+		
 		/// Toggles a favorite twice, so it ends as it was. An existing favorite loses its original date.
 		@Test func toggleFavoriteTrack() async throws {
 			let session = try await LiveSession.session()

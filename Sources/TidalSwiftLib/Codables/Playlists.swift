@@ -15,6 +15,111 @@ struct Playlists: Decodable {
 	let items: [Playlist]
 }
 
+struct PlaylistItems: @MainActor PagedList {
+	let limit: Int
+	let offset: Int
+	let totalNumberOfItems: Int
+	let items: [PlaylistItem]
+}
+
+/// A track or video in a playlist
+public enum PlaylistItem: Codable, Equatable, Hashable, Identifiable {
+	case track(Track)
+	case video(Video)
+	
+	/// Unique within the playlist, even when it contains a track or video more than once
+	public var id: String {
+		switch self {
+		case let .track(track):
+			track.itemUuid?.uuidString ?? "track-\(track.id)"
+		case let .video(video):
+			video.itemUuid?.uuidString ?? "video-\(video.id)"
+		}
+	}
+	
+	/// The track or video ID. ``PlaylistEditing/addTracks(_:to:duplicate:)`` takes both, as they share one number space.
+	public var mediaId: Int {
+		switch self {
+		case let .track(track): track.id
+		case let .video(video): video.id
+		}
+	}
+	
+	public var track: Track? {
+		if case let .track(track) = self {
+			return track
+		}
+		return nil
+	}
+	
+	public var video: Video? {
+		if case let .video(video) = self {
+			return video
+		}
+		return nil
+	}
+	
+	public var title: String {
+		switch self {
+		case let .track(track): track.title
+		case let .video(video): video.title
+		}
+	}
+	
+	public var artists: [Artist] {
+		switch self {
+		case let .track(track): track.artists
+		case let .video(video): video.artists
+		}
+	}
+	
+	/// In seconds
+	public var duration: Int {
+		switch self {
+		case let .track(track): track.duration
+		case let .video(video): video.duration
+		}
+	}
+	
+	/// When it was added to the playlist
+	public var dateAdded: Date? {
+		switch self {
+		case let .track(track): track.dateAdded
+		case let .video(video): video.dateAdded
+		}
+	}
+	
+	private enum CodingKeys: String, CodingKey {
+		case type, item
+	}
+	
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: CodingKeys.self)
+		let type = try container.decode(String.self, forKey: .type)
+		switch type {
+		case "track":
+			self = .track(try container.decode(Track.self, forKey: .item))
+		case "video":
+			self = .video(try container.decode(Video.self, forKey: .item))
+		default:
+			// Not skipped, as the positions of the items after it would no longer match Tidal's
+			throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Unknown playlist item type \(type)")
+		}
+	}
+	
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: CodingKeys.self)
+		switch self {
+		case let .track(track):
+			try container.encode("track", forKey: .type)
+			try container.encode(track, forKey: .item)
+		case let .video(video):
+			try container.encode("video", forKey: .type)
+			try container.encode(video, forKey: .item)
+		}
+	}
+}
+
 public enum PlaylistType: String, Codable {
 	case user = "USER"
 	case editorial = "EDITORIAL"

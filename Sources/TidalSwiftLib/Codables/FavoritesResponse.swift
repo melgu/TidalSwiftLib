@@ -18,13 +18,16 @@ struct FavoritesResponse: Decodable {
 	let updatedFavoriteVideos: Date?
 }
 
-protocol FavoritesPage: Decodable {
+/// One page of a list Tidal returns in pages
+protocol PagedList: Decodable {
 	associatedtype Item: Decodable
+	/// The page size Tidal used, which may be smaller than the one asked for
+	var limit: Int { get }
 	var totalNumberOfItems: Int { get }
 	var items: [Item] { get }
 }
 
-struct FavoriteArtists: @MainActor FavoritesPage {
+struct FavoriteArtists: @MainActor PagedList {
 	let limit: Int
 	let offset: Int
 	let totalNumberOfItems: Int
@@ -50,7 +53,7 @@ public struct FavoriteArtist: Decodable, Equatable, Identifiable {
 	}
 }
 
-struct FavoriteAlbums: @MainActor FavoritesPage {
+struct FavoriteAlbums: @MainActor PagedList {
 	let limit: Int
 	let offset: Int
 	let totalNumberOfItems: Int
@@ -76,7 +79,7 @@ public struct FavoriteAlbum: Decodable, Equatable, Identifiable {
 	}
 }
 
-struct FavoriteTracks: @MainActor FavoritesPage {
+struct FavoriteTracks: @MainActor PagedList {
 	let limit: Int
 	let offset: Int
 	let totalNumberOfItems: Int
@@ -102,7 +105,7 @@ public struct FavoriteTrack: Decodable, Equatable, Identifiable {
 	}
 }
 
-struct FavoriteVideos: @MainActor FavoritesPage {
+struct FavoriteVideos: @MainActor PagedList {
 	let limit: Int
 	let offset: Int
 	let totalNumberOfItems: Int
@@ -128,7 +131,7 @@ public struct FavoriteVideo: Decodable, Equatable, Identifiable {
 	}
 }
 
-struct FavoritePlaylists: @MainActor FavoritesPage {
+struct FavoritePlaylists: @MainActor PagedList {
 	let limit: Int
 	let offset: Int
 	let totalNumberOfItems: Int

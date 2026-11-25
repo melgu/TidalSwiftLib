@@ -54,7 +54,7 @@ public class Favorites {
 	
 	/// Fetches every page, so the result doesn't depend on the order.
 	/// - Note: Defaults to newest first, because Tidal's default order isn't stable across pages and repeats or skips items.
-	private func allPages<Page: FavoritesPage>(_ pageType: Page.Type, url: URL, pageSize: Int, order: String?, orderDirection: OrderDirection?) async -> [Page.Item]? {
+	private func allPages<Page: PagedList>(_ pageType: Page.Type, url: URL, pageSize: Int, order: String?, orderDirection: OrderDirection?) async -> [Page.Item]? {
 		var items: [Page.Item] = []
 		var offset = 0
 		while true {

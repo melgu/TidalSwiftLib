@@ -9,7 +9,7 @@
 import AVFoundation
 import Foundation
 
-struct Tracks: Decodable {
+struct Tracks: @MainActor PagedList {
 	let limit: Int
 	let offset: Int
 	let totalNumberOfItems: Int

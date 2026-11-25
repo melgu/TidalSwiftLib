@@ -72,6 +72,8 @@ enum TestItems {
 	static let similarArtistId = 27343			// David Guetta
 	static let videoId = 24114562				// Lose Yourself to Dance
 	static let playlistId = "abd35446-6a67-4f2b-9f92-0636742c63cb"	// Daft Punk Essentials
+	/// More than one page of playlist items
+	static let largePlaylistId = "49af4fb6-30c9-489b-a2f2-ac858bba9a95"	// '80s: Dolby Atmos
 }
 
 /// Runs the live tests one after the other, to go easy on the API

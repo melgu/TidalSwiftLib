@@ -34,6 +34,10 @@ public struct Video: Codable, Equatable, Identifiable, Hashable {
 	public let adsUrl: String?
 	public let adsPrePaywallOnly: Bool
 	public let artists: [Artist]
+	// Only set for the items of a playlist
+	public let dateAdded: Date?
+	public let index: Int?
+	public let itemUuid: UUID?
 //	public let album: Album? // Sometimes Tidal returns empty object here which breaks things. In all other cases I found, returns nil otherwise, so doesn't matter anyways.
 	
 	public func isInFavorites(session: Session) async -> Bool? {

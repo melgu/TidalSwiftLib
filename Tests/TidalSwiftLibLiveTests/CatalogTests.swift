@@ -149,6 +149,28 @@ extension LiveTests {
 			
 			#expect(tracks.count == playlist.numberOfTracks)
 		}
+		
+		@Test func items() async throws {
+			let session = try await LiveSession.session()
+			let playlist = try #require(await session.playlist(playlistId: TestItems.playlistId))
+			let items = try #require(await session.playlistItems(playlistId: TestItems.playlistId))
+			
+			#expect(items.count == playlist.numberOfTracks + playlist.numberOfVideos)
+			#expect(Set(items.map(\.id)).count == items.count)
+		}
+		
+		/// Tidal returns at most 100 items per page
+		@Test func itemsOfLargePlaylist() async throws {
+			let session = try await LiveSession.session()
+			let playlist = try #require(await session.playlist(playlistId: TestItems.largePlaylistId))
+			try #require(playlist.numberOfTracks + playlist.numberOfVideos > 100, "The playlist is no longer large enough")
+			let items = try #require(await session.playlistItems(playlistId: TestItems.largePlaylistId))
+			let tracks = try #require(await session.playlistTracks(playlistId: TestItems.largePlaylistId))
+			
+			#expect(items.count == playlist.numberOfTracks + playlist.numberOfVideos)
+			#expect(tracks.count == items.count)
+			#expect(Set(items.map(\.id)).count == items.count)
+		}
 	}
 	
 	@Suite struct Videos {
