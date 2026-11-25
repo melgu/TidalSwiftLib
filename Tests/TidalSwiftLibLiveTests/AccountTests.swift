@@ -75,6 +75,23 @@ extension LiveTests {
 			#expect(playlists.allSatisfy { $0.creator.id == userId })
 			#expect(await session.userPlaylists(userId: userId) != nil)
 		}
+		
+		/// Restoring a backup right away changes nothing, also with override
+		@Test func backupAndPlan() async throws {
+			let session = try await LiveSession.session()
+			let favorites = try #require(session.favorites)
+			let backup = try await session.backup()
+			#expect(backup.userId == session.userId)
+			#expect(backup.favorites.tracks.count == (await favorites.tracks())?.count)
+			#expect(backup.favorites.playlists.count + backup.playlists.count == (await favorites.playlists())?.count)
+			#expect(backup.favorites.tracks.allSatisfy { $0.dateAdded != nil })
+			// The file keeps whole seconds
+			#expect(try AccountBackup(data: backup.data()).data() == backup.data())
+			
+			let plan = try await session.restorePlan(for: backup, options: .init(override: true, deletePlaylists: true))
+			#expect(plan.isEmpty)
+			#expect(plan.ownPlaylists.count == backup.playlists.count)
+		}
 	}
 	
 	@Suite struct Discovery {

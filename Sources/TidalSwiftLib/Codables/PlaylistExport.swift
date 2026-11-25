@@ -105,29 +105,40 @@ nonisolated public struct PlaylistExport: Codable, Equatable, Sendable {
 	/// Reads a file written by ``data()``
 	/// - Throws: ``PlaylistExportError/unsupportedFormatVersion(_:)`` for files of a newer version, or a `DecodingError`
 	public init(data: Data) throws {
-		struct Version: Decodable {
-			let formatVersion: Int
-		}
-		let decoder = Self.decoder
-		let version = try decoder.decode(Version.self, from: data).formatVersion
+		let version = try ExportCoding.formatVersion(of: data)
 		guard version <= Self.currentFormatVersion else {
 			throw PlaylistExportError.unsupportedFormatVersion(version)
 		}
-		self = try decoder.decode(Self.self, from: data)
+		self = try ExportCoding.decoder.decode(Self.self, from: data)
 	}
 	
 	/// Pretty-printed JSON with sorted keys, so exports of the same playlist can be compared with a diff
 	public func data() throws -> Data {
+		try ExportCoding.encoder.encode(self)
+	}
+}
+
+/// The JSON of exports and backups
+nonisolated enum ExportCoding {
+	static var encoder: JSONEncoder {
 		let encoder = JSONEncoder()
 		encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
 		encoder.dateEncodingStrategy = .iso8601
-		return try encoder.encode(self)
+		return encoder
 	}
 	
-	private static var decoder: JSONDecoder {
+	static var decoder: JSONDecoder {
 		let decoder = JSONDecoder()
 		decoder.dateDecodingStrategy = .iso8601
 		return decoder
+	}
+	
+	/// Read first, so a file of a newer version gets a clear error instead of a decoding error
+	static func formatVersion(of data: Data) throws -> Int {
+		struct Version: Decodable {
+			let formatVersion: Int
+		}
+		return try decoder.decode(Version.self, from: data).formatVersion
 	}
 }
 

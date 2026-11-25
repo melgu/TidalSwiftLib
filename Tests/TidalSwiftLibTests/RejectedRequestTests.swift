@@ -16,6 +16,7 @@ nonisolated final class FakeTransport: @unchecked Sendable {
 	
 	private let lock = NSLock()
 	private var answers: [String: Answer] = [:]
+	private var handler: (@Sendable (URLRequest) -> Answer?)?
 	private var _requests: [URLRequest] = []
 	
 	/// Unanswered GETs get an empty page, POSTs and DELETEs an empty success
@@ -30,12 +31,17 @@ nonisolated final class FakeTransport: @unchecked Sendable {
 		lock.withLock { answers[method] = Answer(statusCode: statusCode, body: body) }
 	}
 	
+	/// Answers the requests it returns an answer for, before the answers by method
+	func answer(_ handler: @escaping @Sendable (URLRequest) -> Answer?) {
+		lock.withLock { self.handler = handler }
+	}
+	
 	var transport: HTTPTransport {
 		{ [self] request in
 			let method = request.httpMethod ?? "GET"
 			let answer = lock.withLock {
 				_requests.append(request)
-				return answers[method] ?? Answer(statusCode: 200, body: method == "GET" ? #"{"limit":0,"offset":0,"totalNumberOfItems":0,"items":[]}"# : "")
+				return handler?(request) ?? answers[method] ?? Answer(statusCode: 200, body: method == "GET" ? #"{"limit":0,"offset":0,"totalNumberOfItems":0,"items":[]}"# : "")
 			}
 			let response = HTTPURLResponse(url: request.url!, statusCode: answer.statusCode, httpVersion: "HTTP/1.1", headerFields: nil)!
 			return (Data(answer.body.utf8), response)
@@ -45,7 +51,7 @@ nonisolated final class FakeTransport: @unchecked Sendable {
 
 @MainActor
 struct RejectedRequestTests {
-	static let notFound = #"{"status":404,"subStatus":2001,"userMessage":"Track not found"}"#
+	nonisolated static let notFound = #"{"status":404,"subStatus":2001,"userMessage":"Track not found"}"#
 	
 	let fake = FakeTransport()
 	let session: Session

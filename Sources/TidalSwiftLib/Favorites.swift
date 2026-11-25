@@ -8,6 +8,20 @@
 
 import Foundation
 
+nonisolated public enum FavoriteKind: String, CaseIterable, Sendable {
+	case tracks, videos, albums, artists, playlists
+	
+	var idsParameter: String {
+		switch self {
+		case .tracks: "trackIds"
+		case .videos: "videoIds"
+		case .albums: "albumIds"
+		case .artists: "artistIds"
+		case .playlists: "uuids"
+		}
+	}
+}
+
 public class Favorites {
 	private unowned let session: Session
 	private var cache: FavoritesCache!
@@ -207,6 +221,44 @@ public class Favorites {
 			return true
 		} catch {
 			return false
+		}
+	}
+	
+	// Several at once
+	
+	/// Adds the IDs, or UUIDs for playlists. Tidal gives favorites added together the same date, so their order gets lost.
+	func add(_ ids: [String], kind: FavoriteKind) async -> AddOutcome {
+		let url = URL(string: "\(baseUrl)/\(kind.rawValue)")!
+		var parameters = session.sessionParameters
+		parameters[kind.idsParameter] = ids.joined(separator: ",")
+		do {
+			_ = try await session.post(url: url, parameters: parameters)
+			return .added
+		} catch let error as RequestError where error.statusCode == 404 {
+			return .notFound
+		} catch {
+			return .failed
+		}
+	}
+	
+	/// Removes the IDs, or UUIDs for playlists. Tidal accepts IDs that aren't favorites.
+	func remove(_ ids: [String], kind: FavoriteKind) async -> Bool {
+		let url = URL(string: "\(baseUrl)/\(kind.rawValue)/\(ids.joined(separator: ","))")!
+		do {
+			_ = try await session.delete(url: url, parameters: session.sessionParameters)
+			return true
+		} catch {
+			return false
+		}
+	}
+	
+	func refreshCache(of kind: FavoriteKind) async {
+		switch kind {
+		case .tracks: await refreshCachedTracks()
+		case .videos: await refreshCachedVideos()
+		case .albums: await refreshCachedAlbums()
+		case .artists: await refreshCachedArtists()
+		case .playlists: await refreshCachedPlaylists()
 		}
 	}
 	

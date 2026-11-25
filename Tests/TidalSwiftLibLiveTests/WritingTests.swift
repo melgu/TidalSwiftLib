@@ -167,6 +167,64 @@ extension LiveTests {
 			#expect(items.first?.mediaId == replaced.replaced.first?.track.id)
 		}
 		
+		/// Restores a fresh backup with an extra favorite and playlist, after a playlist changed.
+		/// With override, it would also remove favorites added during the test, so it runs only for a moment.
+		@Test func restoreBackup() async throws {
+			try await withTemporaryPlaylist { session, playlist in
+				let favorites = try #require(session.favorites)
+				let albumTracks = try #require(await session.albumTracks(albumId: TestItems.albumId)).map(\.id)
+				let favoriteTracks = Set(try #require(await favorites.tracks()).map(\.id))
+				let extraFavorite = try #require(albumTracks.first { !favoriteTracks.contains($0) })
+				#expect(await session.playlistEditing.addTrack(albumTracks[0], to: playlist.uuid, duplicate: false))
+				
+				let backup = try await session.backup()
+				let extraTrack = try #require(await session.track(trackId: extraFavorite))
+				let title = "TidalSwiftLib Test Restore \(Date().formatted(.iso8601))"
+				let source = try #require(await session.exportPlaylist(playlistId: playlist.uuid))
+				let extraPlaylist = try PlaylistExport(data: source.data()
+					.replacing(Data(playlist.uuid.utf8), with: Data("00000000-0000-4000-8000-000000000001".utf8))
+					.replacing(Data(#""title" : "\#(playlist.title)""#.utf8), with: Data(#""title" : "\#(title)""#.utf8)))
+				let modified = AccountBackup(
+					userId: backup.userId,
+					favorites: AccountBackup.FavoriteLists(
+						tracks: [PlaylistExport.Item(.track(extraTrack)).dated(.now)] + backup.favorites.tracks,
+						videos: backup.favorites.videos,
+						albums: backup.favorites.albums,
+						artists: backup.favorites.artists,
+						playlists: backup.favorites.playlists
+					),
+					playlists: backup.playlists + [extraPlaylist]
+				)
+				#expect(await session.playlistEditing.addTrack(albumTracks[1], to: playlist.uuid, duplicate: false))
+				
+				let merge = try await session.restorePlan(for: modified)
+				#expect(merge.tracks.add.map(\.id) == [extraFavorite])
+				#expect(merge.ownPlaylists.filter { !$0.isUnchanged }.map(\.title) == [title])
+				
+				let plan = try await session.restorePlan(for: modified, options: .init(override: true))
+				#expect(plan.tracks.remove.isEmpty)
+				#expect(plan.ownPlaylists.filter { !$0.isUnchanged }.map(\.title) == [playlist.title, title])
+				let result = try await session.restore(plan)
+				let created = try #require(result.ownPlaylists.compactMap(\.imported).first { $0.playlist.title == title }?.playlist)
+				do {
+					#expect(result.tracks.added.map(\.id) == [extraFavorite])
+					#expect(await favorites.doFavoritesContainTrack(trackId: extraFavorite) == true)
+					#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [albumTracks[0]])
+					#expect(await session.playlistItems(playlistId: created.uuid)?.map(\.mediaId) == [albumTracks[0]])
+					
+					// Found again by its title
+					let again = try await session.restorePlan(for: modified)
+					#expect(again.isEmpty)
+				} catch {
+					_ = await session.playlistEditing.delete(playlistId: created.uuid)
+					await favorites.removeTrack(trackId: extraFavorite)
+					throw error
+				}
+				#expect(await session.playlistEditing.delete(playlistId: created.uuid))
+				#expect(await favorites.removeTrack(trackId: extraFavorite))
+			}
+		}
+		
 		/// Toggles a favorite twice, so it ends as it was. An existing favorite loses its original date.
 		@Test func toggleFavoriteTrack() async throws {
 			let session = try await LiveSession.session()

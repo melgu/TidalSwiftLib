@@ -19,6 +19,8 @@ Changes to the public API affect the app, the command line tool and outside user
 
 **Models (`Codables/`):** `Codable` structs for every Tidal entity — `Album`, `Artist`, `Track`, `Video`, `Playlist`, login responses, etc.
 
+**Exports and backups:** `PlaylistExport` and `AccountBackup` are file formats with a `formatVersion`, not models: they keep IDs and what's needed to find an item again, so they don't change with the models. Raise the version when a file can no longer be read by an older version. `PlaylistImport.swift` and `AccountRestore.swift` write them back, see `docs/account-backup.md`.
+
 The package has no dependencies.
 
 ## Build, Test, and Development Commands

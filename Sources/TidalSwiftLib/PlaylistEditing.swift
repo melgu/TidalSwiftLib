@@ -8,6 +8,14 @@
 
 import Foundation
 
+/// What adding IDs to a playlist or the favorites came to
+enum AddOutcome {
+	case added
+	/// Tidal doesn't know one of the IDs, and added none of them
+	case notFound
+	case failed
+}
+
 public class PlaylistEditing {
 	unowned let session: Session
 	private let baseUrl: String
@@ -31,13 +39,6 @@ public class PlaylistEditing {
 	/// - Returns: False also if Tidal doesn't know one of the IDs, which fails the whole request
 	public func addTracks(_ trackIds: [Int], to playlistId: String, duplicate: Bool) async -> Bool {
 		await add(trackIds, to: playlistId, duplicate: duplicate) == .added
-	}
-	
-	enum AddOutcome {
-		case added
-		/// Tidal doesn't know one of the IDs, and added none of them
-		case notFound
-		case failed
 	}
 	
 	func add(_ ids: [Int], to playlistId: String, duplicate: Bool) async -> AddOutcome {

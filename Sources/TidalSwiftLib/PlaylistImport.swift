@@ -114,23 +114,26 @@ extension PlaylistEditing {
 /// Adds items in batches and finds the ones Tidal doesn't know, as a single unknown ID fails the whole batch
 struct PlaylistImporter {
 	/// Tidal takes at least 500 at once, fewer keep the requests small
-	static let batchSize = 100
+	static let defaultBatchSize = 100
 	
-	let add: ([Int]) async -> PlaylistEditing.AddOutcome
+	let batchSize: Int
+	let add: ([Int]) async -> AddOutcome
 	let alternatives: (String) async -> [Track]?
 	
 	private(set) var added: [PlaylistExport.Item] = []
 	private(set) var replaced: [PlaylistImportResult.Replacement] = []
 	private(set) var missing: [PlaylistExport.Item] = []
 	
-	init(add: @escaping ([Int]) async -> PlaylistEditing.AddOutcome, alternatives: @escaping (String) async -> [Track]?) {
+	/// - Parameter batchSize: 1 adds the items one by one, e.g. to favorites, where items added together get the same date and lose their order
+	init(batchSize: Int = defaultBatchSize, add: @escaping ([Int]) async -> AddOutcome, alternatives: @escaping (String) async -> [Track]?) {
+		self.batchSize = batchSize
 		self.add = add
 		self.alternatives = alternatives
 	}
 	
 	mutating func add(_ items: [PlaylistExport.Item]) async throws {
-		for start in stride(from: 0, to: items.count, by: Self.batchSize) {
-			try await addBatch(Array(items[start..<min(start + Self.batchSize, items.count)]))
+		for start in stride(from: 0, to: items.count, by: batchSize) {
+			try await addBatch(Array(items[start..<min(start + batchSize, items.count)]))
 		}
 	}
 	

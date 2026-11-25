@@ -90,7 +90,7 @@ struct PlaylistImporterTests {
 			self.known = known
 		}
 		
-		func add(_ ids: [Int]) -> PlaylistEditing.AddOutcome {
+		func add(_ ids: [Int]) -> AddOutcome {
 			requests += 1
 			guard ids.allSatisfy(known.contains) else {
 				return .notFound
