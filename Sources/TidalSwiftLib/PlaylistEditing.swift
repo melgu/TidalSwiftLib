@@ -62,6 +62,7 @@ public class PlaylistEditing {
 		}
 	}
 	
+	/// - Parameter toIndex: The position the item ends up at, e.g. 2 moves the first of `[a, b, c]` to the end
 	public func moveItem(fromIndex: Int, toIndex: Int, in playlistId: String) async -> Bool {
 		let url = URL(string: "\(baseUrl)/\(playlistId)/items/\(fromIndex)")!
 		var parameters = session.sessionParameters

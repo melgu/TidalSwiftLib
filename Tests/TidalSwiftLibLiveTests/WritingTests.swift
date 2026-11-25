@@ -47,17 +47,19 @@ extension LiveTests {
 				let albumTracks = try #require(await session.albumTracks(albumId: TestItems.albumId))
 				let trackIds = albumTracks.prefix(3).map(\.id)
 				#expect(await session.playlistEditing.addTracks(trackIds, to: playlist.uuid, duplicate: false))
-				#expect(try #require(await session.playlistTracks(playlistId: playlist.uuid)).map(\.id) == trackIds)
+				#expect(await session.playlistTracks(playlistId: playlist.uuid)?.map(\.id) == trackIds)
 				
 				#expect(await session.playlistEditing.addTrack(trackIds[0], to: playlist.uuid, duplicate: true))
-				#expect(try #require(await session.playlistTracks(playlistId: playlist.uuid)).map(\.id) == trackIds + [trackIds[0]])
+				#expect(await session.playlistTracks(playlistId: playlist.uuid)?.map(\.id) == trackIds + [trackIds[0]])
 				
 				#expect(await session.playlistEditing.moveItem(fromIndex: 0, toIndex: 2, in: playlist.uuid))
-				#expect(try #require(await session.playlistTracks(playlistId: playlist.uuid)).map(\.id) == [trackIds[1], trackIds[0], trackIds[2], trackIds[0]])
+				let moved = await session.playlistTracks(playlistId: playlist.uuid)?.map(\.id)
+				#expect(moved == [trackIds[1], trackIds[2], trackIds[0], trackIds[0]])
 				
 				#expect(await session.playlistEditing.removeItem(atIndex: 3, from: playlist.uuid))
 				#expect(await session.playlistEditing.removeItem(atIndex: 0, from: playlist.uuid))
-				#expect(try #require(await session.playlistTracks(playlistId: playlist.uuid)).map(\.id) == [trackIds[0], trackIds[2]])
+				let remaining = await session.playlistTracks(playlistId: playlist.uuid)?.map(\.id)
+				#expect(remaining == [trackIds[2], trackIds[0]])
 			}
 		}
 		
