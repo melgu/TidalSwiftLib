@@ -100,13 +100,13 @@ public struct Track: Codable, Equatable, Identifiable, Hashable {
 				return AudioStream(url: url, pathExtension: "m4a", isDolbyAtmos: true)
 			}
 		}
-		// Tidal sends the PKCE login stereo even for Atmos-only tracks
-		if logins.contains(.pkce) && (audioQuality != .high || !logins.contains(.device) || !hasStereo) {
+		// Tidal sends both logins stereo even for Atmos-only tracks
+		if logins.contains(.pkce) && (audioQuality != .high || !logins.contains(.device)) {
 			if let stream = await session.dashStream(trackId: id, audioQuality: audioQuality) {
 				return stream
 			}
 		}
-		guard hasStereo, let (url, deliveredQuality) = await session.audioUrl(trackId: id, audioQuality: .high) else {
+		guard let (url, deliveredQuality) = await session.audioUrl(trackId: id, audioQuality: .high) else {
 			return nil
 		}
 		var stream = AudioStream(url: url, pathExtension: session.pathExtension(for: .high), isDolbyAtmos: false)
@@ -189,14 +189,6 @@ struct TrackManifest: Decodable {
 	let codecs: String
 	let encryptionType: String
 	let urls: [URL]
-}
-
-struct AudioUrl: Decodable {
-	let url: URL
-	let trackId: Int
-	let soundQuality: AudioQuality
-	let encryptionKey: String
-	let codec: String
 }
 
 public enum TrackSorting: Int, Codable {

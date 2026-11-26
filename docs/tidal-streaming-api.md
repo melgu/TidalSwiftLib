@@ -26,7 +26,7 @@ Tracks never report `HI_RES_LOSSLESS` as their `audioQuality` in the v1 API; the
 
 ## Endpoints
 
-### v1 `GET /tracks/{id}/streamUrl` (legacy, used for stereo)
+### v1 `GET /tracks/{id}/streamUrl` (legacy, no longer used)
 
 Parameter `soundQuality`.
 
@@ -36,6 +36,9 @@ Parameter `soundQuality`.
 | `LOSSLESS` | Direct FLAC URL, 16/44.1 |
 | `HI_RES_LOSSLESS` | Same as `LOSSLESS` |
 | Atmos-only tracks | 401 `subStatus 4005` |
+| Tracks with stereo and Atmos (November 2026) | 401 `subStatus 4005` |
+
+It has no parameter to ask for stereo, so it refuses every track with an Atmos mode: Coolio – Gangsta's Paradise (219775152) and Matt Johnson – Blinding Lights (188600501), both `STEREO` and `DOLBY_ATMOS`, like the Atmos-only ones. Stereo-only tracks such as Get Lucky still get their FLAC. TidalSwiftLib therefore takes stereo for the device login from `playbackinfopostpaywall` with `immersiveaudio=false`, which gives every track the same FLAC, see below.
 
 `/tracks/{id}/offlineUrl` returns 404 for every quality and track, so TidalSwift no longer offers it.
 
@@ -49,6 +52,8 @@ Parameters: `audioquality`, `playbackmode`, `assetpresentation=FULL`, optionally
 | `LOSSLESS`, `HI_RES_LOSSLESS` | BTS manifest (`application/vnd.tidal.bts`), direct FLAC URL, 16/44.1, `encryptionType: NONE` |
 | Track with Atmos, any quality | BTS manifest, `eac3`, `encryptionType: NONE`, `audioMode: DOLBY_ATMOS` |
 | Track with stereo and Atmos, `immersiveaudio=false` | Stereo FLAC |
+| Atmos-only track, `LOSSLESS`, `immersiveaudio=false` (November 2026) | Stereo FLAC, 16/44.1 |
+| Stereo-only track, `LOSSLESS` | The same FLAC URL as `streamUrl` |
 | `playbackmode=OFFLINE` for Atmos | 401 `subStatus 4005` |
 
 - Tracks with both modes return **Atmos by default**. Only `immersiveaudio=false` forces stereo; `audiomode=STEREO` has no effect.

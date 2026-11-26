@@ -66,6 +66,10 @@ enum TestItems {
 	static let albumId = 20115556				// Random Access Memories
 	static let albumTrackCount = 13
 	static let trackId = 20115564				// Get Lucky
+	/// Stereo and Dolby Atmos
+	static let stereoAndDolbyAtmosTrackId = 188600501	// Matt Johnson – Blinding Lights
+	/// Only Dolby Atmos
+	static let dolbyAtmosTrackId = 125155092	// The Weeknd – Blinding Lights
 	/// Get Lucky has no lyrics on Tidal
 	static let lyricsTrackId = 20115557			// Give Life Back to Music
 	/// Tidal has no similar artists for Daft Punk

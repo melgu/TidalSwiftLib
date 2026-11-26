@@ -12,46 +12,45 @@ import OSLog
 private let logger = Logger(category: "ContentUrls")
 
 extension Session {
-	/// Only the device login gets `streamUrl`
+	/// Unencrypted FLAC in High from the device login, which only gets the Low qualities encrypted.
+	///
+	/// Stereo even for tracks with Dolby Atmos, also for Atmos-only ones. `streamUrl` refuses every track with Atmos.
 	func audioUrl(trackId: Int, audioQuality: AudioQuality) async -> (url: URL, quality: AudioQuality)? {
-		guard let login = login(.device) else { return nil }
-		var parameters = sessionParameters
-		parameters["soundQuality"] = "\(audioQuality.rawValue)"
-		let url = URL(string: "\(AuthInformation.APILocation)/tracks/\(trackId)/streamUrl")!
-		do {
-			let response: AudioUrl = try await get(url: url, parameters: parameters, login: login)
-			
-//			print("""
-//			Track ID: \(response.trackId),
-//			Quality: \(response.soundQuality.rawValue),
-//			Codec: \(response.codec)
-//			""")
-			
-			return (response.url.upgradedToHTTPS, response.soundQuality)
-		} catch {
-			return nil
-		}
+		guard let (response, manifest) = await devicePlaybackManifest(trackId: trackId, audioQuality: audioQuality, immersiveAudio: false),
+			  response.audioMode != .dolbyAtmos,
+			  manifest.codecs == "flac",
+			  let url = manifest.urls.first else { return nil }
+		return (url.upgradedToHTTPS, response.audioQuality ?? audioQuality)
 	}
 	
 	/// Only unencrypted E-AC-3 streams, which AVFoundation plays directly. Tidal refuses Atmos in offline playback mode.
 	/// Only the device login gets them, the PKCE login gets stereo.
 	func dolbyAtmosUrl(trackId: Int) async -> URL? {
+		guard let (response, manifest) = await devicePlaybackManifest(trackId: trackId, audioQuality: .high, immersiveAudio: true),
+			  response.audioMode == .dolbyAtmos,
+			  manifest.codecs == "eac3" else { return nil }
+		return manifest.urls.first?.upgradedToHTTPS
+	}
+	
+	/// A single unencrypted file, as `playbackinfopostpaywall` gives the device login for High and Dolby Atmos.
+	/// Tracks with Atmos get it by default, and stereo with `immersiveAudio` off.
+	private func devicePlaybackManifest(trackId: Int, audioQuality: AudioQuality, immersiveAudio: Bool) async -> (TrackPlaybackInfo, TrackManifest)? {
 		guard let login = login(.device) else { return nil }
 		let url = URL(string: "\(AuthInformation.APILocation)/tracks/\(trackId)/playbackinfopostpaywall")!
 		var parameters = sessionParameters
-		parameters["audioquality"] = AudioQuality.high.rawValue
+		parameters["audioquality"] = audioQuality.rawValue
 		parameters["playbackmode"] = "STREAM"
 		parameters["assetpresentation"] = "FULL"
-		parameters["immersiveaudio"] = "true"
+		parameters["immersiveaudio"] = "\(immersiveAudio)"
 		do {
 			let response: TrackPlaybackInfo = try await get(url: url, parameters: parameters, login: login)
-			guard response.audioMode == .dolbyAtmos,
-				  response.manifestMimeType == "application/vnd.tidal.bts",
+			guard response.manifestMimeType == "application/vnd.tidal.bts",
 				  let decodedManifestData = Data(base64Encoded: response.manifest) else { return nil }
 			let manifest = try JSONDecoder().decode(TrackManifest.self, from: decodedManifestData)
-			guard manifest.codecs == "eac3", manifest.encryptionType == "NONE" else { return nil }
-			return manifest.urls.first?.upgradedToHTTPS
+			guard manifest.encryptionType == "NONE" else { return nil }
+			return (response, manifest)
 		} catch {
+			logger.error("No playback info for track \(trackId): \(String(describing: error), privacy: .public)")
 			return nil
 		}
 	}
@@ -75,7 +74,7 @@ extension Session {
 		}
 	}
 	
-	/// The PKCE login gets unencrypted DASH streams in every quality, but `streamUrl` refuses it
+	/// The PKCE login gets unencrypted DASH streams in every quality
 	func dashStream(trackId: Int, audioQuality: AudioQuality) async -> AudioStream? {
 		guard let login = login(.pkce) else { return nil }
 		let url = URL(string: "\(AuthInformation.APILocation)/tracks/\(trackId)/playbackinfopostpaywall")!
