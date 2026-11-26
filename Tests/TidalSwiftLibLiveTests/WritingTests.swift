@@ -189,6 +189,9 @@ extension LiveTests {
 				#expect(extraPlaylist.isPublic)
 				// An old date, which the restore keeps
 				let extraDate = Date(timeIntervalSince1970: 1_500_000_000)
+				let blockedIds = Set(try #require(await session.blocks.tracks()).map(\.item.id))
+				let blockedTrackId = try #require(albumTracks.last { !blockedIds.contains($0) && $0 != extraFavorite })
+				let blockedTrack = try #require(await session.track(trackId: blockedTrackId))
 				let folderName = "TidalSwiftLib Test Folder \(Date().formatted(.iso8601))"
 				let folder = AccountBackup.FolderEntry(id: "00000000-0000-4000-8000-000000000002", name: folderName, parent: nil, dateAdded: nil, playlists: [
 					AccountBackup.FolderPlaylist(uuid: extraPlaylist.uuid, dateAdded: nil),
@@ -204,7 +207,12 @@ extension LiveTests {
 						mixes: backup.favorites.mixes
 					),
 					playlists: backup.playlists + [extraPlaylist],
-					folders: (backup.folders ?? []) + [folder]
+					folders: (backup.folders ?? []) + [folder],
+					blocks: AccountBackup.BlockLists(
+						artists: backup.blocks?.artists ?? [],
+						tracks: [PlaylistExport.Item(.track(blockedTrack))] + (backup.blocks?.tracks ?? []),
+						videos: backup.blocks?.videos ?? []
+					)
 				)
 				#expect(await session.playlistEditing.addTrack(albumTracks[1], to: playlist.uuid, duplicate: false))
 				
@@ -217,6 +225,7 @@ extension LiveTests {
 				#expect(plan.ownPlaylists.filter { !$0.isUnchanged }.map(\.title) == [playlist.title, title])
 				#expect(plan.folders.create.map(\.name) == [folderName])
 				#expect(plan.folders.moves.map(\.title) == [title])
+				#expect(plan.blocks.tracks.add.map(\.id) == [blockedTrack.id])
 				let result = try await session.restore(plan)
 				let created = try #require(result.ownPlaylists.compactMap(\.imported).first { $0.playlist.title == title }?.playlist)
 				#expect(created.publicPlaylist)
@@ -230,6 +239,8 @@ extension LiveTests {
 					#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [albumTracks[0]])
 					#expect(await session.playlistItems(playlistId: created.uuid)?.map(\.mediaId) == [albumTracks[0]])
 					#expect(result.folders.created == [folderName])
+					#expect(result.blockedTracks.added.map(\.id) == [blockedTrack.id])
+					#expect(await session.blocks.tracks()?.contains { $0.item.id == blockedTrack.id } == true)
 					let placed = try await session.playlistFolders.items().first { $0.id == created.uuid }
 					#expect(placed?.parent?.id == folderId)
 					
@@ -239,6 +250,7 @@ extension LiveTests {
 				} catch {
 					_ = await session.playlistEditing.delete(playlistId: created.uuid)
 					await favorites.removeTrack(trackId: extraFavorite)
+					await session.blocks.unblock(.tracks, id: blockedTrack.id)
 					if let folderId {
 						try? await session.playlistFolders.deleteFolders([folderId])
 					}
@@ -246,6 +258,7 @@ extension LiveTests {
 				}
 				#expect(await session.playlistEditing.delete(playlistId: created.uuid))
 				#expect(await favorites.removeTrack(trackId: extraFavorite))
+				#expect(await session.blocks.unblock(.tracks, id: blockedTrack.id))
 				// Empty now, as its playlist is deleted
 				let emptyFolder = try #require(folderId)
 				try await session.playlistFolders.deleteFolders([emptyFolder])
@@ -268,6 +281,19 @@ extension LiveTests {
 				#expect(await favorites.removeTrack(trackId: TestItems.trackId))
 			}
 			#expect(await favorites.doFavoritesContainTrack(trackId: TestItems.trackId) == wasFavorite)
+		}
+		
+		/// Blocks a video for a moment, if it isn't blocked already
+		@Test func blockVideo() async throws {
+			let session = try await LiveSession.session()
+			let wasBlocked = try #require(await session.blocks.videos()).contains { $0.item.id == TestItems.videoId }
+			try #require(!wasBlocked, "The test video is blocked already")
+			#expect(await session.blocks.block(.videos, id: TestItems.videoId))
+			#expect(await session.blocks.videos()?.contains { $0.item.id == TestItems.videoId } == true)
+			// Unknown IDs fail
+			#expect(await session.blocks.block(.tracks, id: 1) == false)
+			#expect(await session.blocks.unblock(.videos, id: TestItems.videoId))
+			#expect(await session.blocks.videos()?.contains { $0.item.id == TestItems.videoId } == false)
 		}
 		
 		/// Makes the temporary playlist public for a moment

@@ -46,8 +46,12 @@ struct AccountBackupTests {
 		Plan.ExistingPlaylist(uuid: uuid, title: title, description: description, itemIds: items, isPublic: isPublic)
 	}
 	
-	static func backup(favorites: AccountBackup.FavoriteLists = favorites(), playlists: [PlaylistExport] = [], folders: [AccountBackup.FolderEntry]? = []) -> AccountBackup {
-		AccountBackup(exportedAt: Date(timeIntervalSince1970: 1_795_600_000), userId: 1, favorites: favorites, playlists: playlists, folders: folders)
+	static func backup(favorites: AccountBackup.FavoriteLists = favorites(), playlists: [PlaylistExport] = [], folders: [AccountBackup.FolderEntry]? = [], blocks: AccountBackup.BlockLists? = blocks()) -> AccountBackup {
+		AccountBackup(exportedAt: Date(timeIntervalSince1970: 1_795_600_000), userId: 1, favorites: favorites, playlists: playlists, folders: folders, blocks: blocks)
+	}
+	
+	static func blocks(artists: [Int] = [], tracks: [Int] = []) -> AccountBackup.BlockLists {
+		AccountBackup.BlockLists(artists: artists.map { artist($0) }, tracks: tracks.map { item($0) }, videos: [])
 	}
 	
 	static func date(_ day: Int) -> Date {
@@ -94,17 +98,20 @@ struct AccountBackupTests {
 		var json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
 		json["formatVersion"] = 1
 		json["folders"] = nil
+		json["blocks"] = nil
 		var favorites = try #require(json["favorites"] as? [String: Any])
 		favorites["mixes"] = nil
 		json["favorites"] = favorites
 		let backup = try AccountBackup(data: JSONSerialization.data(withJSONObject: json))
 		#expect(backup.formatVersion == 1)
 		#expect(backup.folders == nil)
+		#expect(backup.blocks == nil)
 		#expect(backup.favorites.mixes == nil)
 		
 		let plan = Plan(backup: backup, current: Self.favorites(mixes: ["m"]), existing: [], collection: nil, options: .init(override: true, deletePlaylists: true))
 		#expect(plan.mixes.isEmpty)
 		#expect(plan.folders.isEmpty)
+		#expect(plan.blocks.isEmpty)
 		#expect(plan.isEmpty)
 	}
 	
@@ -131,6 +138,18 @@ struct AccountBackupTests {
 		let changes = Plan.changes([2, 1], current: [3, 2, 9], key: { $0 }, override: true)
 		#expect(changes.add == [1])
 		#expect(changes.remove == [3, 9])
+	}
+	
+	@Test func restoresBlocks() {
+		let backup = Self.backup(blocks: Self.blocks(artists: [2, 1], tracks: [5]))
+		let current = Self.blocks(artists: [1, 9], tracks: [5])
+		let merge = Plan(backup: backup, current: Self.favorites(), existing: [], collection: nil, currentBlocks: current, options: .init())
+		#expect(merge.blocks.artists.add.map(\.id) == [2])
+		#expect(merge.blocks.artists.remove.isEmpty)
+		#expect(merge.blocks.tracks.isEmpty)
+		let override = Plan(backup: backup, current: Self.favorites(), existing: [], collection: nil, currentBlocks: current, options: .init(override: true))
+		#expect(override.blocks.artists.remove.map(\.id) == [9])
+		#expect(!override.isEmpty)
 	}
 	
 	@Test func restoresMixes() {
@@ -486,6 +505,32 @@ struct FavoritesRestorerTests {
 		#expect(result.added.map(\.id) == ["a", "c"])
 		#expect(result.missing.map(\.id) == ["b"])
 		#expect(result.removed.map(\.id) == ["x"])
+	}
+	
+	// MARK: Blocks
+	
+	/// One request per block, as Tidal takes one ID at a time, and unknown IDs are listed as missing
+	@Test func blocksOneByOne() async throws {
+		fake.answer { request in
+			request.httpMethod == "POST" && request.httpBody.map { String(decoding: $0, as: UTF8.self) }?.contains("artistId=2") == true
+				? .init(statusCode: 404, body: Self.notFound)
+				: nil
+		}
+		let changes = AccountRestorePlan.Changes(add: [1, 2, 3].map { AccountBackupTests.artist($0) }, remove: [AccountBackupTests.artist(9)])
+		let result = try await BlocksRestorer(blocks: session.blocks, progress: nil).restore(changes, kind: .artists, id: \.id)
+		let requests = fake.requests.map { "\($0.httpMethod ?? "") \($0.url?.path() ?? "")" }
+		#expect(requests == Array(repeating: "POST /v1/users/1/blocks/artists", count: 3) + ["DELETE /v1/users/1/blocks/artists/9"])
+		#expect(result.added.map(\.id) == [1, 3])
+		#expect(result.missing.map(\.id) == [2])
+		#expect(result.removed.map(\.id) == [9])
+	}
+	
+	@Test func failedBlockThrows() async {
+		fake.answer("POST", 500)
+		let changes = AccountRestorePlan.Changes(add: [AccountBackupTests.item(1)], remove: [])
+		await #expect(throws: AccountRestoreError.couldNotBlock(.tracks)) {
+			try await BlocksRestorer(blocks: session.blocks, progress: nil).restore(changes, kind: .tracks, id: \.id)
+		}
 	}
 	
 	// MARK: Folders

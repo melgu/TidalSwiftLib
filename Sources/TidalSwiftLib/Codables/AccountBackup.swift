@@ -13,7 +13,7 @@ import Foundation
 /// Like ``PlaylistExport``, it keeps IDs and what's needed to recognize the items or find them again, not the library's models.
 /// Restore it with ``Session/restorePlan(for:options:)`` and ``Session/restore(_:progress:)``.
 nonisolated public struct AccountBackup: Codable, Equatable, Sendable {
-	/// Files with a higher version can't be read. Version 2 added the favorite mixes and the folders.
+	/// Files with a higher version can't be read. Version 2 added the favorite mixes, the folders and the blocks.
 	public static let currentFormatVersion = 2
 	
 	public let formatVersion: Int
@@ -25,6 +25,31 @@ nonisolated public struct AccountBackup: Codable, Equatable, Sendable {
 	public let playlists: [PlaylistExport]
 	/// The folders of the playlists, parents before their subfolders. Nil in backups of version 1, whose restore leaves the folders as they are.
 	public let folders: [FolderEntry]?
+	/// What the account doesn't want recommended. Nil in backups of version 1, whose restore leaves the blocks as they are.
+	public let blocks: BlockLists?
+	
+	/// Newest first. A restore gives them the date of the restore, as Tidal sets it when blocking.
+	public struct BlockLists: Codable, Equatable, Sendable {
+		public let artists: [ArtistEntry]
+		public let tracks: [PlaylistExport.Item]
+		public let videos: [PlaylistExport.Item]
+		
+		public var count: Int {
+			artists.count + tracks.count + videos.count
+		}
+		
+		init(artists: [ArtistEntry], tracks: [PlaylistExport.Item], videos: [PlaylistExport.Item]) {
+			self.artists = artists
+			self.tracks = tracks
+			self.videos = videos
+		}
+		
+		@MainActor init(artists: [FavoriteArtist], tracks: [FavoriteTrack], videos: [FavoriteVideo]) {
+			self.artists = artists.map { ArtistEntry(id: $0.item.id, name: $0.item.name, dateAdded: $0.created) }
+			self.tracks = tracks.map { PlaylistExport.Item(.track($0.item)).dated($0.created) }
+			self.videos = videos.map { PlaylistExport.Item(.video($0.item)).dated($0.created) }
+		}
+	}
 	
 	/// Newest first, as Tidal lists them. A restore gives them their dates again, apart from mixes.
 	public struct FavoriteLists: Codable, Equatable, Sendable {
@@ -110,13 +135,14 @@ nonisolated public struct AccountBackup: Codable, Equatable, Sendable {
 		public let dateAdded: Date?
 	}
 	
-	init(exportedAt: Date = .now, userId: Int, favorites: FavoriteLists, playlists: [PlaylistExport], folders: [FolderEntry]?) {
+	init(exportedAt: Date = .now, userId: Int, favorites: FavoriteLists, playlists: [PlaylistExport], folders: [FolderEntry]?, blocks: BlockLists?) {
 		formatVersion = Self.currentFormatVersion
 		self.exportedAt = exportedAt
 		self.userId = userId
 		self.favorites = favorites
 		self.playlists = playlists
 		self.folders = folders
+		self.blocks = blocks
 	}
 	
 	/// Reads a file written by ``data()``
@@ -141,6 +167,7 @@ nonisolated public enum AccountBackupError: Error, Equatable, CustomStringConver
 	case couldNotLoadFavorites(FavoriteKind)
 	case couldNotLoadPlaylist(title: String)
 	case couldNotLoadFolders
+	case couldNotLoadBlocks
 	
 	public var description: String {
 		switch self {
@@ -154,6 +181,8 @@ nonisolated public enum AccountBackupError: Error, Equatable, CustomStringConver
 			"Couldn't load the items of \(title)"
 		case .couldNotLoadFolders:
 			"Couldn't load the folders of the playlists"
+		case .couldNotLoadBlocks:
+			"Couldn't load the blocked artists, tracks and videos"
 		}
 	}
 }

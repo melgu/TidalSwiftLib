@@ -97,6 +97,20 @@ nonisolated public struct AccountRestorePlan: Sendable {
 	public let playlists: Changes<AccountBackup.PlaylistEntry>
 	/// Empty for backups without mixes
 	public let mixes: Changes<AccountBackup.MixEntry>
+	/// Artists, tracks and videos to block, and with override to unblock. Empty for backups without blocks.
+	public let blocks: BlockChanges
+	
+	public struct BlockChanges: Sendable {
+		public let artists: Changes<AccountBackup.ArtistEntry>
+		public let tracks: Changes<PlaylistExport.Item>
+		public let videos: Changes<PlaylistExport.Item>
+		
+		public var isEmpty: Bool {
+			artists.isEmpty && tracks.isEmpty && videos.isEmpty
+		}
+		
+		static let empty = BlockChanges(artists: .init(add: [], remove: []), tracks: .init(add: [], remove: []), videos: .init(add: [], remove: []))
+	}
 	/// Every own playlist of the backup, and the ones to delete
 	public let ownPlaylists: [PlaylistChange]
 	/// Empty for backups without folders
@@ -104,14 +118,15 @@ nonisolated public struct AccountRestorePlan: Sendable {
 	
 	public var isEmpty: Bool {
 		tracks.isEmpty && videos.isEmpty && albums.isEmpty && artists.isEmpty && playlists.isEmpty && mixes.isEmpty
-			&& ownPlaylists.allSatisfy(\.isUnchanged) && folders.isEmpty
+			&& ownPlaylists.allSatisfy(\.isUnchanged) && folders.isEmpty && blocks.isEmpty
 	}
 	
 	/// - Parameters:
 	///   - current: The account's favorites, without its own playlists
 	///   - existing: The account's own playlists
 	///   - collection: The account's folders and where its playlists are, nil if the backup has no folders
-	init(backup: AccountBackup, current: AccountBackup.FavoriteLists, existing: [ExistingPlaylist], collection: [CollectionItem]?, options: AccountRestoreOptions) {
+	///   - currentBlocks: The account's blocks, nil if the backup has none
+	init(backup: AccountBackup, current: AccountBackup.FavoriteLists, existing: [ExistingPlaylist], collection: [CollectionItem]?, currentBlocks: AccountBackup.BlockLists? = nil, options: AccountRestoreOptions) {
 		self.backup = backup
 		self.options = options
 		let favorites = backup.favorites
@@ -124,6 +139,15 @@ nonisolated public struct AccountRestorePlan: Sendable {
 			mixes = Self.changes(backupMixes, current: current.mixes ?? [], key: \.id, override: options.override)
 		} else {
 			mixes = Changes(add: [], remove: [])
+		}
+		if let backupBlocks = backup.blocks, let currentBlocks {
+			blocks = BlockChanges(
+				artists: Self.changes(backupBlocks.artists, current: currentBlocks.artists, key: \.id, override: options.override),
+				tracks: Self.changes(backupBlocks.tracks, current: currentBlocks.tracks, key: \.id, override: options.override),
+				videos: Self.changes(backupBlocks.videos, current: currentBlocks.videos, key: \.id, override: options.override)
+			)
+		} else {
+			blocks = .empty
 		}
 		ownPlaylists = Self.playlistChanges(backup.playlists, existing: existing, options: options)
 		
@@ -396,6 +420,10 @@ public struct AccountRestoreResult {
 	public internal(set) var artists = Favorites<AccountBackup.ArtistEntry>()
 	public internal(set) var playlists = Favorites<AccountBackup.PlaylistEntry>()
 	public internal(set) var mixes = Favorites<AccountBackup.MixEntry>()
+	/// `added` are the ones blocked, `removed` the ones unblocked
+	public internal(set) var blockedArtists = Favorites<AccountBackup.ArtistEntry>()
+	public internal(set) var blockedTracks = Favorites<PlaylistExport.Item>()
+	public internal(set) var blockedVideos = Favorites<PlaylistExport.Item>()
 	public internal(set) var ownPlaylists: [PlaylistResult] = []
 	public internal(set) var folders = FolderResult()
 }
@@ -408,6 +436,8 @@ nonisolated public enum AccountRestoreError: Error, Equatable, CustomStringConve
 	case couldNotAddFavorites(FavoriteKind)
 	case couldNotRemoveFavorites(FavoriteKind)
 	case couldNotChangeFolders
+	case couldNotBlock(BlockKind)
+	case couldNotUnblock(BlockKind)
 	
 	public var description: String {
 		let message = switch self {
@@ -418,6 +448,8 @@ nonisolated public enum AccountRestoreError: Error, Equatable, CustomStringConve
 		case let .couldNotAddFavorites(kind): "Couldn't add the favorite \(kind.rawValue)"
 		case let .couldNotRemoveFavorites(kind): "Couldn't remove the favorite \(kind.rawValue)"
 		case .couldNotChangeFolders: "Couldn't change the folders"
+		case let .couldNotBlock(kind): "Couldn't block the \(kind.rawValue)"
+		case let .couldNotUnblock(kind): "Couldn't unblock the \(kind.rawValue)"
 		}
 		return message + ". Restoring again continues with what is still missing."
 	}
@@ -429,6 +461,8 @@ public enum AccountRestoreProgress: Sendable {
 	case addingFavorites(FavoriteKind, count: Int)
 	case removingFavorites(FavoriteKind, count: Int)
 	case restoringFolders
+	case blocking(BlockKind, count: Int)
+	case unblocking(BlockKind, count: Int)
 }
 
 extension Session {
@@ -443,7 +477,8 @@ extension Session {
 			existing.append(AccountRestorePlan.ExistingPlaylist(uuid: playlist.uuid, title: playlist.title, description: playlist.description, itemIds: items.map(\.mediaId), isPublic: playlist.publicPlaylist))
 		}
 		let collection = backup.folders == nil ? nil : try await currentFolderItems()
-		return AccountRestorePlan(backup: backup, current: current, existing: existing, collection: collection, options: options)
+		let blocks = backup.blocks == nil ? nil : try await currentBlocks()
+		return AccountRestorePlan(backup: backup, current: current, existing: existing, collection: collection, currentBlocks: blocks, options: options)
 	}
 	
 	/// Makes the changes of the plan: own playlists first, then the favorites with the dates of the backup, then the folders.
@@ -472,6 +507,11 @@ extension Session {
 		(result.videos, _) = try await restorer.restore(items: plan.videos, kind: .videos)
 		result.playlists = try await restorer.restore(plan.playlists, kind: .playlists, id: \.uuid, date: \.dateAdded)
 		result.mixes = try await restorer.restore(plan.mixes, kind: .mixes, id: \.id, date: \.dateAdded)
+		
+		let blocker = BlocksRestorer(blocks: blocks, progress: progress)
+		result.blockedArtists = try await blocker.restore(plan.blocks.artists, kind: .artists, id: \.id)
+		result.blockedTracks = try await blocker.restore(plan.blocks.tracks, kind: .tracks, id: \.id)
+		result.blockedVideos = try await blocker.restore(plan.blocks.videos, kind: .videos, id: \.id)
 		
 		if !plan.folders.isEmpty {
 			progress?(.restoringFolders)
@@ -617,6 +657,36 @@ struct FavoritesRestorer {
 			}
 		}
 		return entries
+	}
+}
+
+/// Blocks and unblocks the artists, tracks and videos of a plan, one by one, as Tidal takes one at a time
+struct BlocksRestorer {
+	let blocks: Blocks
+	let progress: ((AccountRestoreProgress) -> Void)?
+	
+	func restore<Entry>(_ changes: AccountRestorePlan.Changes<Entry>, kind: BlockKind, id: (Entry) -> Int) async throws -> AccountRestoreResult.Favorites<Entry> {
+		var result = AccountRestoreResult.Favorites<Entry>()
+		if !changes.add.isEmpty {
+			progress?(.blocking(kind, count: changes.add.count))
+		}
+		for entry in changes.add {
+			switch await blocks.add(kind, id: id(entry)) {
+			case .added, .partlyAdded: result.added.append(entry)
+			case .notFound: result.missing.append(entry)
+			case .failed: throw AccountRestoreError.couldNotBlock(kind)
+			}
+		}
+		if !changes.remove.isEmpty {
+			progress?(.unblocking(kind, count: changes.remove.count))
+		}
+		for entry in changes.remove {
+			guard await blocks.unblock(kind, id: id(entry)) else {
+				throw AccountRestoreError.couldNotUnblock(kind)
+			}
+			result.removed.append(entry)
+		}
+		return result
 	}
 }
 

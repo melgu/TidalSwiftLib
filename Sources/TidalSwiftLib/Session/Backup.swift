@@ -34,7 +34,14 @@ extension Session {
 			}
 			playlists.append(PlaylistExport(playlist: playlist, items: items))
 		}
-		return AccountBackup(userId: userId, favorites: current, playlists: playlists, folders: folders)
+		return AccountBackup(userId: userId, favorites: current, playlists: playlists, folders: folders, blocks: try await currentBlocks())
+	}
+	
+	func currentBlocks() async throws -> AccountBackup.BlockLists {
+		guard let artists = await blocks.artists(), let tracks = await blocks.tracks(), let videos = await blocks.videos() else {
+			throw AccountBackupError.couldNotLoadBlocks
+		}
+		return AccountBackup.BlockLists(artists: artists, tracks: tracks, videos: videos)
 	}
 	
 	func currentFolderItems() async throws -> [CollectionItem] {
