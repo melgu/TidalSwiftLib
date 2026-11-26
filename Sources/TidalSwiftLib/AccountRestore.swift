@@ -627,7 +627,7 @@ struct FolderRestorer {
 				result.created.append(folder.name)
 			}
 			for rename in changes.rename {
-				try await folders.rename(folderId: rename.folder.id, to: rename.name)
+				try await folders.renameFolder(rename.folder.id, to: rename.name)
 				result.renamed.append(rename)
 			}
 			

@@ -262,5 +262,55 @@ extension LiveTests {
 			}
 			#expect(await favorites.doFavoritesContainTrack(trackId: TestItems.trackId) == wasFavorite)
 		}
+		
+		/// Creates two nested folders with the temporary playlist in the inner one, and deletes them again
+		@Test func playlistFolders() async throws {
+			try await withTemporaryPlaylist { session, playlist in
+				let folders = session.playlistFolders
+				let suffix = Date().formatted(.iso8601)
+				let outer = try #require(await folders.create(name: "TidalSwiftLib Test Outer \(suffix)"))
+				var created = [outer.id]
+				do {
+					let inner = try #require(await folders.create(name: "TidalSwiftLib Test Inner \(suffix)", in: outer.id))
+					created.insert(inner.id, at: 0)
+					#expect(await folders.move(playlists: [playlist.uuid], to: inner.id))
+					
+					let contents = try #require(await folders.contents(of: inner.id))
+					#expect(contents.count == 1)
+					if case let .playlist(listed, folderId, _) = contents.first {
+						#expect(listed.uuid == playlist.uuid)
+						#expect(listed.title == playlist.title)
+						#expect(folderId == inner.id)
+					} else {
+						Issue.record("Expected the playlist, got \(contents)")
+					}
+					#expect(await folders.contents(of: outer.id)?.contains { if case let .folder(folder) = $0 { folder.id == inner.id } else { false } } == true)
+					#expect(await folders.all()?.contains { $0.folderId == outer.id } == true)
+					
+					// Tidal would accept this and lose both folders in a cycle
+					#expect(await folders.move(folderId: outer.id, to: inner.id) == false)
+					#expect(await folders.rename(folderId: outer.id, to: "TidalSwiftLib Test Renamed \(suffix)"))
+					
+					// Moves the inner folder, with the playlist in it, to the root
+					#expect(await folders.delete(folderId: outer.id))
+					created.removeLast()
+					let all = try #require(await folders.all())
+					#expect(!all.contains { if case let .folder(folder) = $0 { folder.id == outer.id } else { false } })
+					#expect(all.contains { if case let .folder(folder) = $0 { folder.id == inner.id && folder.parentId == nil } else { false } })
+					#expect(await folders.contents(of: inner.id)?.count == 1)
+					#expect(await folders.delete(folderId: inner.id))
+					created.removeAll()
+				} catch {
+					for id in created {
+						_ = await folders.delete(folderId: id)
+					}
+					throw error
+				}
+				// Left over if an expectation failed
+				for id in created {
+					_ = await folders.delete(folderId: id)
+				}
+			}
+		}
 	}
 }

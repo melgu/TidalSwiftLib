@@ -21,6 +21,12 @@ nonisolated struct CollectionItem: Decodable, Equatable, Sendable {
 		let id: String
 	}
 	
+	/// A folder's details
+	struct FolderData: Decodable, Equatable, Sendable {
+		let createdAt: Date?
+		let totalNumberOfItems: Int?
+	}
+	
 	/// `trn:folder:<id>` or `trn:playlist:<uuid>`
 	let trn: String
 	let itemType: ItemType
@@ -29,6 +35,9 @@ nonisolated struct CollectionItem: Decodable, Equatable, Sendable {
 	let name: String
 	/// Nil at the root
 	let parent: Parent?
+	/// Nil if Tidal's answer didn't have it or it couldn't be read
+	var folder: FolderData? = nil
+	var playlist: V2Playlist? = nil
 	
 	/// The folder's ID or the playlist's UUID
 	var id: String {
@@ -41,6 +50,77 @@ nonisolated struct CollectionItem: Decodable, Equatable, Sendable {
 	
 	static func trn(playlist uuid: String) -> String {
 		"trn:playlist:\(uuid)"
+	}
+}
+
+nonisolated extension CollectionItem {
+	private enum CodingKeys: String, CodingKey {
+		case trn, itemType, addedAt, name, parent, data
+	}
+	
+	/// Reads `data` leniently, as the listing is still usable without it
+	init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: CodingKeys.self)
+		trn = try container.decode(String.self, forKey: .trn)
+		itemType = try container.decode(ItemType.self, forKey: .itemType)
+		addedAt = try container.decodeIfPresent(Date.self, forKey: .addedAt)
+		name = try container.decode(String.self, forKey: .name)
+		parent = try container.decodeIfPresent(Parent.self, forKey: .parent)
+		switch itemType {
+		case .folder: folder = try? container.decodeIfPresent(FolderData.self, forKey: .data)
+		case .playlist: playlist = try? container.decodeIfPresent(V2Playlist.self, forKey: .data)
+		}
+	}
+}
+
+/// A playlist as the v2 API has it, with its visibility as `sharingLevel` instead of `publicPlaylist`
+nonisolated struct V2Playlist: Decodable, Equatable, Sendable {
+	struct Creator: Decodable, Equatable, Sendable {
+		let id: Int?
+		let name: String?
+		let picture: String?
+	}
+	
+	let uuid: String
+	let type: String
+	let creator: Creator
+	/// `PUBLIC` or `PRIVATE`
+	let sharingLevel: String?
+	let title: String
+	let description: String?
+	let image: String?
+	let squareImage: String?
+	let url: URL
+	let created: Date
+	let lastUpdated: Date
+	let duration: Int
+	let numberOfTracks: Int
+	let numberOfVideos: Int
+}
+
+extension Playlist {
+	/// - Note: v2 has no popularity, so it's 0
+	init?(_ playlist: V2Playlist) {
+		guard let type = PlaylistType(rawValue: playlist.type) else {
+			return nil
+		}
+		self.init(
+			uuid: playlist.uuid,
+			title: playlist.title,
+			numberOfTracks: playlist.numberOfTracks,
+			numberOfVideos: playlist.numberOfVideos,
+			creator: PlaylistCreator(id: playlist.creator.id, name: playlist.creator.name, url: nil, picture: playlist.creator.picture, popularity: nil),
+			description: playlist.description,
+			duration: playlist.duration,
+			lastUpdated: playlist.lastUpdated,
+			created: playlist.created,
+			type: type,
+			publicPlaylist: playlist.sharingLevel == "PUBLIC",
+			url: playlist.url,
+			image: playlist.image,
+			popularity: 0,
+			squareImage: playlist.squareImage
+		)
 	}
 }
 
