@@ -1,6 +1,8 @@
 # Account Backup and Restore
 
-`Session.backup()` saves the favorites, the own playlists and the folders of the playlists of an account as an `AccountBackup`, which `restorePlan(for:options:)` compares with an account and `restore(_:)` writes back.
+`Session.backup()` saves the favorites, the own playlists, the folders of the playlists and the blocked artists, tracks and videos of an account as an `AccountBackup`, which `restorePlan(for:options:)` compares with an account and `restore(_:)` writes back.
+
+Not in a backup: followed users, as Tidal only lets accounts follow artists, which are the favorite artists, and custom playlist covers.
 
 The favorites and folders come from three APIs: v1 for reading favorites and playlists, Tidal's official API (`openapi.tidal.com`) for adding favorites with their date, and the private v2 API for folders and favorite mixes. See [v2-api.md](v2-api.md).
 
@@ -16,16 +18,18 @@ Findings from probing the v1 favorites endpoints (November 2026):
 
 ## Format
 
-- Version 2 added the favorite mixes (`favorites.mixes`) and the folders (`folders`). Both are optional, so backups of version 1 can still be read. A restore of such a backup leaves mixes and folders as they are, also with override, as it doesn't know them.
+- Version 2 added the favorite mixes (`favorites.mixes`), the folders (`folders`) and the blocks (`blocks`). They are optional, so backups of version 1 can still be read. A restore of such a backup leaves mixes, folders and blocks as they are, also with override, as it doesn't know them.
 - `folders` lists each folder with its `parent` (nil at the root) and the playlists in it, own ones and favorites of others, by UUID. Playlists at the root aren't listed. Folders come parents first.
 - Tidal allows folders whose parent was deleted and cycles of folders. The backup puts such folders at the root, breaking a cycle where it closes.
 
 ## Restoring
 
 - The plan is computed first and changes nothing, so a dry run and the restore use the same comparison.
-- Without override, a restore only adds: missing favorites, missing playlists, the items a playlist is missing, at its end, and missing folders. Playlists and folders at the root are put into their folder of the backup, but nothing is taken out of a folder. With override, it also removes favorites the backup doesn't have, replaces title, description and items of playlists that differ, renames folders, and moves folders and playlists to where the backup has them, the root included. Deleting own playlists and folders the backup doesn't have is a separate option. The contents of a deleted folder are moved to the root first, as Tidal leaves them behind otherwise.
+- Without override, a restore only adds: missing favorites, missing playlists, the items a playlist is missing, at its end, missing folders and missing blocks. Playlists and folders at the root are put into their folder of the backup, but nothing is taken out of a folder. With override, it also removes favorites the backup doesn't have, replaces title, description, visibility and items of playlists that differ, renames folders, moves folders and playlists to where the backup has them, the root included, and unblocks what the backup doesn't block.
+- Playlists a restore creates get the visibility of the backup, as v1 creates them private. Appending to a playlist leaves its visibility. A single playlist import (`importPlaylist`) always creates private playlists, so copying someone's public playlist doesn't put it on the profile.
+- Blocks are added one by one, as Tidal takes one at a time, and get the date of the restore. Deleting own playlists and folders the backup doesn't have is a separate option. The contents of a deleted folder are moved to the root first, as Tidal leaves them behind otherwise.
 - Favorites are added in batches of 50 with their date from the backup, so their order is kept as well. Mixes can't get a date, so they're added one by one, oldest first, and get the date of the restore.
 - Own playlists are found by their UUID, and else by their title if exactly one playlist in the backup and one in the account have it. A playlist that a restore created again has a new UUID, so a second restore finds it by its title instead of creating it twice. Folders are found the same way, by their ID or by their name within the same parent.
 - New folders are created at the root, as Tidal ignores a parent there, and then moved. Playlists are moved into folders one by one, oldest first, as a folder lists its items by when they were put into it. Before moving folders around, override moves them to the root, and every move into a folder is checked against the tree, as Tidal accepts moves that put a folder into itself.
 - Tracks Tidal no longer knows are replaced by another track of the same recording, found by their ISRC, as in a playlist import. The replacement gets the original's date. With override, such a replacement isn't removed as a favorite the backup doesn't have.
-- The restore goes in this order: own playlists, favorites, folders. When Tidal rejects a change, it stops. The changes before it are made, so restoring again continues with what is still missing.
+- The restore goes in this order: own playlists, favorites, blocks, folders. When Tidal rejects a change, it stops. The changes before it are made, so restoring again continues with what is still missing.
