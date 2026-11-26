@@ -131,3 +131,75 @@ struct PlaylistFoldersTests {
 		#expect(await session.playlistFolders.rename(folderId: "f", to: "Name") == false)
 	}
 }
+
+/// Moving and removing playlist items by the ID of their entry, against a fake Tidal
+@MainActor
+struct PlaylistEntryTests {
+	let fake = FakeTransport()
+	let session: Session
+	
+	init() {
+		session = Session(config: Config(accessToken: "token", refreshToken: "", clientID: "client"), keychainService: "de.melgu.TidalSwiftLib.unit-tests")
+		session.countryCode = "DE"
+		session.userId = 1
+		session.transport = fake.transport
+		fake.answer { _ in .init(statusCode: 200, body: #"{"links":{},"meta":{}}"#) }
+	}
+	
+	/// A track of a playlist, with the ID of its entry
+	static func item(_ id: Int, entry: Int? = nil) throws -> PlaylistItem {
+		let uuid = entry.map { #""00000000-0000-4000-8000-\#(String(format: "%012d", $0))""# } ?? "null"
+		let json = """
+			{
+				"id": \(id), "title": "Song", "duration": 200, "replayGain": -6.5, "allowStreaming": true, "streamReady": true,
+				"trackNumber": 1, "volumeNumber": 1, "popularity": 10, "url": "http://www.tidal.com/track/\(id)", "editable": false,
+				"explicit": false, "artists": [{ "id": 7, "name": "Artist" }], "album": { "id": 3, "title": "Album" }, "itemUuid": \(uuid)
+			}
+			"""
+		return .track(try JSONDecoder.custom.decode(Track.self, from: Data(json.utf8)))
+	}
+	
+	/// The JSON:API documents sent
+	var documents: [[String: Any]] {
+		fake.requests.compactMap { $0.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
+	}
+	
+	@Test func movesInFrontOfAnItemInBatches() async throws {
+		let items = try (1...25).map { try Self.item($0, entry: $0) }
+		let before = try Self.item(99, entry: 99)
+		#expect(await session.playlistEditing.move(items, before: before, in: "p"))
+		#expect(fake.requests.map(\.httpMethod) == ["PATCH", "PATCH"])
+		#expect(fake.requests.first?.url?.path() == "/v2/playlists/p/relationships/items")
+		#expect(fake.requests.first?.value(forHTTPHeaderField: "Content-Type") == "application/vnd.api+json")
+		let first = try #require(documents.first)
+		let data = try #require(first["data"] as? [[String: Any]])
+		#expect(data.count == 20)
+		#expect(data.first?["type"] as? String == "tracks")
+		#expect((data.first?["meta"] as? [String: Any])?["itemId"] as? String == "00000000-0000-4000-8000-000000000001")
+		#expect((first["meta"] as? [String: Any])?["positionBefore"] as? String == "00000000-0000-4000-8000-000000000099")
+		#expect((documents.last?["data"] as? [[String: Any]])?.count == 5)
+	}
+	
+	@Test func movesToTheEndWithoutPosition() async throws {
+		#expect(await session.playlistEditing.move([try Self.item(1, entry: 1)], before: nil, in: "p"))
+		#expect(documents.first?["meta"] == nil)
+	}
+	
+	@Test func removesByEntry() async throws {
+		#expect(await session.playlistEditing.remove([try Self.item(1, entry: 1), try Self.item(1, entry: 2)], from: "p"))
+		#expect(fake.requests.map(\.httpMethod) == ["DELETE"])
+		let data = try #require(documents.first?["data"] as? [[String: Any]])
+		#expect(data.compactMap { ($0["meta"] as? [String: Any])?["itemId"] as? String }.count == 2)
+	}
+	
+	/// Items only have an entry ID in a playlist
+	@Test func refusesItemsWithoutEntry() async throws {
+		#expect(await session.playlistEditing.remove([try Self.item(1)], from: "p") == false)
+		#expect(fake.requests.isEmpty)
+	}
+	
+	@Test func failedRequestReturnsFalse() async throws {
+		fake.answer { _ in .init(statusCode: 500, body: "") }
+		#expect(await session.playlistEditing.remove([try Self.item(1, entry: 1)], from: "p") == false)
+	}
+}

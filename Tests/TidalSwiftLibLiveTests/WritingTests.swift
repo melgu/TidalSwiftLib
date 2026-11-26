@@ -283,6 +283,28 @@ extension LiveTests {
 			#expect(await favorites.doFavoritesContainTrack(trackId: TestItems.trackId) == wasFavorite)
 		}
 		
+		/// Moves and removes items by their entry, which a change in between doesn't shift
+		@Test func editByEntry() async throws {
+			try await withTemporaryPlaylist { session, playlist in
+				let tracks = try #require(await session.albumTracks(albumId: TestItems.albumId)).prefix(3).map(\.id)
+				#expect(await session.playlistEditing.addTracks(tracks + [TestItems.videoId], to: playlist.uuid, duplicate: false))
+				let items = try #require(await session.playlistItems(playlistId: playlist.uuid))
+				#expect(items.map(\.mediaId) == tracks + [TestItems.videoId])
+				
+				// The video and the third track in front of the first
+				#expect(await session.playlistEditing.move([items[3], items[2]], before: items[0], in: playlist.uuid))
+				#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [TestItems.videoId, tracks[2], tracks[0], tracks[1]])
+				
+				// Another change in between, which would shift positions
+				#expect(await session.playlistEditing.removeItem(atIndex: 0, from: playlist.uuid))
+				#expect(await session.playlistEditing.remove([items[1]], from: playlist.uuid))
+				#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [tracks[2], tracks[0]])
+				
+				#expect(await session.playlistEditing.move([items[2]], before: nil, in: playlist.uuid))
+				#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [tracks[0], tracks[2]])
+			}
+		}
+		
 		/// Blocks a video for a moment, if it isn't blocked already
 		@Test func blockVideo() async throws {
 			let session = try await LiveSession.session()

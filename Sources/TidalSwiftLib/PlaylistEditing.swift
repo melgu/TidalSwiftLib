@@ -110,6 +110,46 @@ public class PlaylistEditing {
 		}
 	}
 	
+	// MARK: By entry
+	
+	/// Items sent in one request
+	static let itemBatchSize = 20
+	
+	/// Removes the items wherever they are now, by the ID of their entry, so changes to the playlist meanwhile can't make it remove another one.
+	/// Through Tidal's official API. Items already removed are ignored.
+	/// - Parameter items: As ``Session/playlistItems(playlistId:)`` lists them, which gives each entry its ID
+	/// - Returns: False also if an item has no entry ID. The batches before a failed one are removed by then.
+	public func remove(_ items: [PlaylistItem], from playlistId: String) async -> Bool {
+		await sendItems(.delete, items, before: nil, playlistId: playlistId)
+	}
+	
+	/// Moves the items in front of another one, keeping their order, or to the end, by the ID of their entry.
+	/// Through Tidal's official API.
+	/// - Parameters:
+	///   - items: As ``Session/playlistItems(playlistId:)`` lists them, which gives each entry its ID
+	///   - before: The item to move them in front of, nil for the end
+	/// - Returns: False also if an item has no entry ID
+	public func move(_ items: [PlaylistItem], before: PlaylistItem?, in playlistId: String) async -> Bool {
+		await sendItems(.patch, items, before: before, playlistId: playlistId)
+	}
+	
+	private func sendItems(_ method: Network.HttpMethod, _ items: [PlaylistItem], before: PlaylistItem?, playlistId: String) async -> Bool {
+		let url = URL(string: "\(AuthInformation.OpenAPILocation)/playlists/\(playlistId)/relationships/items")!
+		let parameters = session.countryCode.map { ["countryCode": $0] } ?? [:]
+		// Each batch goes in front of the same item, or to the end, after the batch before, so the order stays
+		for start in stride(from: 0, to: items.count, by: Self.itemBatchSize) {
+			guard let document = PlaylistItemsDocument(Array(items[start..<min(start + Self.itemBatchSize, items.count)]), before: before) else {
+				return false
+			}
+			do {
+				let _: IgnoredAnswer = try await session.send(method, url: url, parameters: parameters, document: document)
+			} catch {
+				return false
+			}
+		}
+		return true
+	}
+	
 	public func create(title: String, description: String) async -> Playlist? {
 		guard let userId = session.userId else {
 			return nil

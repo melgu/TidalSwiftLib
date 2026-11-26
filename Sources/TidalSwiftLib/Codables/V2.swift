@@ -174,6 +174,56 @@ nonisolated struct CollectionItemsDocument: Encodable, Sendable {
 	let data: [Resource]
 }
 
+/// Items of a playlist to move or remove, by the ID of their entry
+nonisolated struct PlaylistItemsDocument: Encodable, Sendable {
+	struct Resource: Encodable, Sendable {
+		struct Meta: Encodable, Sendable {
+			let itemId: String
+		}
+		
+		let id: String
+		/// `tracks` or `videos`
+		let type: String
+		let meta: Meta
+	}
+	
+	struct Meta: Encodable, Sendable {
+		/// The entry to move the items in front of
+		let positionBefore: String
+	}
+	
+	let data: [Resource]
+	/// Nil moves the items to the end
+	let meta: Meta?
+	
+	/// Nil if an item has no entry ID, as items only have one in a playlist
+	@MainActor init?(_ items: [PlaylistItem], before: PlaylistItem? = nil) {
+		var data: [Resource] = []
+		for item in items {
+			let (id, type, uuid) = switch item {
+			case let .track(track): (track.id, "tracks", track.itemUuid)
+			case let .video(video): (video.id, "videos", video.itemUuid)
+			}
+			guard let uuid else {
+				return nil
+			}
+			data.append(Resource(id: String(id), type: type, meta: Resource.Meta(itemId: uuid.uuidString.lowercased())))
+		}
+		self.data = data
+		if let before {
+			guard let uuid = before.track?.itemUuid ?? before.video?.itemUuid else {
+				return nil
+			}
+			meta = Meta(positionBefore: uuid.uuidString.lowercased())
+		} else {
+			meta = nil
+		}
+	}
+}
+
+/// For answers whose content isn't needed
+nonisolated struct IgnoredAnswer: Decodable, Sendable {}
+
 nonisolated struct CollectionItemsAnswer: Decodable, Sendable {
 	struct Meta: Decodable, Sendable {
 		let skipped: [Skipped]?
