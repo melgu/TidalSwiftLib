@@ -184,16 +184,24 @@ extension LiveTests {
 				let extraPlaylist = try PlaylistExport(data: source.data()
 					.replacing(Data(playlist.uuid.utf8), with: Data("00000000-0000-4000-8000-000000000001".utf8))
 					.replacing(Data(#""title" : "\#(playlist.title)""#.utf8), with: Data(#""title" : "\#(title)""#.utf8)))
+				// An old date, which the restore keeps
+				let extraDate = Date(timeIntervalSince1970: 1_500_000_000)
+				let folderName = "TidalSwiftLib Test Folder \(Date().formatted(.iso8601))"
+				let folder = AccountBackup.FolderEntry(id: "00000000-0000-4000-8000-000000000002", name: folderName, parent: nil, dateAdded: nil, playlists: [
+					AccountBackup.FolderPlaylist(uuid: extraPlaylist.uuid, dateAdded: nil),
+				])
 				let modified = AccountBackup(
 					userId: backup.userId,
 					favorites: AccountBackup.FavoriteLists(
-						tracks: [PlaylistExport.Item(.track(extraTrack)).dated(.now)] + backup.favorites.tracks,
+						tracks: backup.favorites.tracks + [PlaylistExport.Item(.track(extraTrack)).dated(extraDate)],
 						videos: backup.favorites.videos,
 						albums: backup.favorites.albums,
 						artists: backup.favorites.artists,
-						playlists: backup.favorites.playlists
+						playlists: backup.favorites.playlists,
+						mixes: backup.favorites.mixes
 					),
-					playlists: backup.playlists + [extraPlaylist]
+					playlists: backup.playlists + [extraPlaylist],
+					folders: (backup.folders ?? []) + [folder]
 				)
 				#expect(await session.playlistEditing.addTrack(albumTracks[1], to: playlist.uuid, duplicate: false))
 				
@@ -204,24 +212,36 @@ extension LiveTests {
 				let plan = try await session.restorePlan(for: modified, options: .init(override: true))
 				#expect(plan.tracks.remove.isEmpty)
 				#expect(plan.ownPlaylists.filter { !$0.isUnchanged }.map(\.title) == [playlist.title, title])
+				#expect(plan.folders.create.map(\.name) == [folderName])
+				#expect(plan.folders.moves.map(\.title) == [title])
 				let result = try await session.restore(plan)
 				let created = try #require(result.ownPlaylists.compactMap(\.imported).first { $0.playlist.title == title }?.playlist)
+				let folderId = try await session.playlistFolders.items().first { $0.itemType == .folder && $0.name == folderName }?.id
 				do {
 					#expect(result.tracks.added.map(\.id) == [extraFavorite])
-					#expect(await favorites.doFavoritesContainTrack(trackId: extraFavorite) == true)
+					#expect(await favorites.tracks()?.first { $0.item.id == extraFavorite }?.created == extraDate)
 					#expect(await session.playlistItems(playlistId: playlist.uuid)?.map(\.mediaId) == [albumTracks[0]])
 					#expect(await session.playlistItems(playlistId: created.uuid)?.map(\.mediaId) == [albumTracks[0]])
+					#expect(result.folders.created == [folderName])
+					let placed = try await session.playlistFolders.items().first { $0.id == created.uuid }
+					#expect(placed?.parent?.id == folderId)
 					
-					// Found again by its title
+					// Found again by its title and name
 					let again = try await session.restorePlan(for: modified)
 					#expect(again.isEmpty)
 				} catch {
 					_ = await session.playlistEditing.delete(playlistId: created.uuid)
 					await favorites.removeTrack(trackId: extraFavorite)
+					if let folderId {
+						try? await session.playlistFolders.deleteFolders([folderId])
+					}
 					throw error
 				}
 				#expect(await session.playlistEditing.delete(playlistId: created.uuid))
 				#expect(await favorites.removeTrack(trackId: extraFavorite))
+				// Empty now, as its playlist is deleted
+				let emptyFolder = try #require(folderId)
+				try await session.playlistFolders.deleteFolders([emptyFolder])
 			}
 		}
 		

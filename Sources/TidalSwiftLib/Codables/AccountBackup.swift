@@ -13,8 +13,8 @@ import Foundation
 /// Like ``PlaylistExport``, it keeps IDs and what's needed to recognize the items or find them again, not the library's models.
 /// Restore it with ``Session/restorePlan(for:options:)`` and ``Session/restore(_:progress:)``.
 nonisolated public struct AccountBackup: Codable, Equatable, Sendable {
-	/// Files with a higher version can't be read
-	public static let currentFormatVersion = 1
+	/// Files with a higher version can't be read. Version 2 added the favorite mixes and the folders.
+	public static let currentFormatVersion = 2
 	
 	public let formatVersion: Int
 	public let exportedAt: Date
@@ -23,8 +23,10 @@ nonisolated public struct AccountBackup: Codable, Equatable, Sendable {
 	public let favorites: FavoriteLists
 	/// The account's own playlists, in Tidal's order. Favorite playlists of others are in ``favorites``.
 	public let playlists: [PlaylistExport]
+	/// The folders of the playlists, parents before their subfolders. Nil in backups of version 1, whose restore leaves the folders as they are.
+	public let folders: [FolderEntry]?
 	
-	/// Newest first, as Tidal lists them. Their dates can't be restored, as Tidal sets them when adding.
+	/// Newest first, as Tidal lists them. A restore gives them their dates again, apart from mixes.
 	public struct FavoriteLists: Codable, Equatable, Sendable {
 		public let tracks: [PlaylistExport.Item]
 		public let videos: [PlaylistExport.Item]
@@ -32,27 +34,57 @@ nonisolated public struct AccountBackup: Codable, Equatable, Sendable {
 		public let artists: [ArtistEntry]
 		/// Playlists of others
 		public let playlists: [PlaylistEntry]
+		/// Nil in backups of version 1, whose restore leaves the mixes as they are
+		public let mixes: [MixEntry]?
 		
 		public var count: Int {
-			tracks.count + videos.count + albums.count + artists.count + playlists.count
+			tracks.count + videos.count + albums.count + artists.count + playlists.count + (mixes?.count ?? 0)
 		}
 		
-		init(tracks: [PlaylistExport.Item], videos: [PlaylistExport.Item], albums: [AlbumEntry], artists: [ArtistEntry], playlists: [PlaylistEntry]) {
+		init(tracks: [PlaylistExport.Item], videos: [PlaylistExport.Item], albums: [AlbumEntry], artists: [ArtistEntry], playlists: [PlaylistEntry], mixes: [MixEntry]?) {
 			self.tracks = tracks
 			self.videos = videos
 			self.albums = albums
 			self.artists = artists
 			self.playlists = playlists
+			self.mixes = mixes
 		}
 		
 		/// - Parameter playlists: Without the account's own playlists
-		@MainActor init(tracks: [FavoriteTrack], videos: [FavoriteVideo], albums: [FavoriteAlbum], artists: [FavoriteArtist], playlists: [FavoritePlaylist]) {
+		@MainActor init(tracks: [FavoriteTrack], videos: [FavoriteVideo], albums: [FavoriteAlbum], artists: [FavoriteArtist], playlists: [FavoritePlaylist], mixes: [FavoriteMix]) {
 			self.tracks = tracks.map { PlaylistExport.Item(.track($0.item)).dated($0.created) }
 			self.videos = videos.map { PlaylistExport.Item(.video($0.item)).dated($0.created) }
 			self.albums = albums.map { AlbumEntry(id: $0.item.id, title: $0.item.title, version: $0.item.version, artists: ($0.item.artists ?? []).map(\.name), upc: $0.item.upc, dateAdded: $0.created) }
 			self.artists = artists.map { ArtistEntry(id: $0.item.id, name: $0.item.name, dateAdded: $0.created) }
 			self.playlists = playlists.map { PlaylistEntry(uuid: $0.playlist.uuid, title: $0.playlist.title, creator: $0.playlist.creator.name, dateAdded: $0.created) }
+			self.mixes = mixes.map { MixEntry(id: $0.id, title: $0.title, subTitle: $0.subTitle, dateAdded: $0.dateAdded) }
 		}
+	}
+	
+	/// A mix, such as "My Mix 1". Personal mixes belong to their account, so another account can't add them.
+	public struct MixEntry: Codable, Equatable, Sendable {
+		public let id: String
+		public let title: String
+		public let subTitle: String?
+		public let dateAdded: Date?
+	}
+	
+	/// A folder of playlists
+	public struct FolderEntry: Codable, Equatable, Sendable {
+		public let id: String
+		public let name: String
+		/// The ID of the folder it is in, nil at the root
+		public let parent: String?
+		/// When it was put into its parent
+		public let dateAdded: Date?
+		/// The playlists in it, own ones and favorites of others, newest first
+		public let playlists: [FolderPlaylist]
+	}
+	
+	public struct FolderPlaylist: Codable, Equatable, Sendable {
+		public let uuid: String
+		/// When it was put into the folder
+		public let dateAdded: Date?
 	}
 	
 	public struct AlbumEntry: Codable, Equatable, Sendable {
@@ -78,12 +110,13 @@ nonisolated public struct AccountBackup: Codable, Equatable, Sendable {
 		public let dateAdded: Date?
 	}
 	
-	init(exportedAt: Date = .now, userId: Int, favorites: FavoriteLists, playlists: [PlaylistExport]) {
+	init(exportedAt: Date = .now, userId: Int, favorites: FavoriteLists, playlists: [PlaylistExport], folders: [FolderEntry]?) {
 		formatVersion = Self.currentFormatVersion
 		self.exportedAt = exportedAt
 		self.userId = userId
 		self.favorites = favorites
 		self.playlists = playlists
+		self.folders = folders
 	}
 	
 	/// Reads a file written by ``data()``
@@ -107,6 +140,7 @@ nonisolated public enum AccountBackupError: Error, Equatable, CustomStringConver
 	case notLoggedIn
 	case couldNotLoadFavorites(FavoriteKind)
 	case couldNotLoadPlaylist(title: String)
+	case couldNotLoadFolders
 	
 	public var description: String {
 		switch self {
@@ -118,6 +152,8 @@ nonisolated public enum AccountBackupError: Error, Equatable, CustomStringConver
 			"Couldn't load the favorite \(kind.rawValue)"
 		case let .couldNotLoadPlaylist(title):
 			"Couldn't load the items of \(title)"
+		case .couldNotLoadFolders:
+			"Couldn't load the folders of the playlists"
 		}
 	}
 }
@@ -126,5 +162,10 @@ nonisolated extension PlaylistExport.Item {
 	/// With the date it was added to the favorites
 	func dated(_ date: Date) -> Self {
 		Self(type: type, id: id, title: title, version: version, artists: artists, album: album, isrc: isrc, duration: duration, dateAdded: date)
+	}
+	
+	/// The same item with the ID of another track, e.g. a replacement
+	func withId(_ id: Int) -> Self {
+		Self(type: type, id: id, title: title, version: version, artists: artists, album: album, isrc: isrc, duration: duration, dateAdded: dateAdded)
 	}
 }

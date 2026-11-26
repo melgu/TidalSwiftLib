@@ -85,6 +85,8 @@ extension LiveTests {
 			#expect(backup.favorites.tracks.count == (await favorites.tracks())?.count)
 			#expect(backup.favorites.playlists.count + backup.playlists.count == (await favorites.playlists())?.count)
 			#expect(backup.favorites.tracks.allSatisfy { $0.dateAdded != nil })
+			#expect(backup.favorites.mixes?.count == (await favorites.mixes())?.count)
+			#expect(backup.folders?.count == (try await session.playlistFolders.items()).filter { $0.itemType == .folder }.count)
 			// The file keeps whole seconds
 			#expect(try AccountBackup(data: backup.data()).data() == backup.data())
 			

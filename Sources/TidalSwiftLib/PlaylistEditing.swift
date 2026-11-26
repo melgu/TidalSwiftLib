@@ -9,10 +9,12 @@
 import Foundation
 
 /// What adding IDs to a playlist or the favorites came to
-enum AddOutcome {
+enum AddOutcome: Equatable {
 	case added
 	/// Tidal doesn't know one of the IDs, and added none of them
 	case notFound
+	/// Tidal added all but these, which it doesn't know
+	case partlyAdded(notFound: Set<Int>)
 	case failed
 }
 
@@ -38,7 +40,10 @@ public class PlaylistEditing {
 	/// - Parameter trackIds: Track or video IDs, as Tidal takes both
 	/// - Returns: False also if Tidal doesn't know one of the IDs, which fails the whole request
 	public func addTracks(_ trackIds: [Int], to playlistId: String, duplicate: Bool) async -> Bool {
-		await add(trackIds, to: playlistId, duplicate: duplicate) == .added
+		if case .added = await add(trackIds, to: playlistId, duplicate: duplicate) {
+			return true
+		}
+		return false
 	}
 	
 	func add(_ ids: [Int], to playlistId: String, duplicate: Bool) async -> AddOutcome {

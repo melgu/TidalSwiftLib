@@ -36,15 +36,32 @@ extension Session {
 		try await authenticatedRequest(method: .delete, url: url, parameters: parameters, etag: etag)
 	}
 	
-	private func authenticatedRequest(method: Network.HttpMethod, url: URL, parameters: [String: String], etag: Int? = nil, login: Config? = nil) async throws -> Response {
+	/// With the parameters in the URL, as the v2 API takes them
+	func put<Result: Decodable>(url: URL, parameters: [String: String], decoder: JSONDecoder = .v2) async throws -> Result {
+		let response = try await authenticatedRequest(method: .put, url: url, parameters: parameters)
+		return try decoder.decode(Result.self, from: response.data)
+	}
+	
+	/// For changes that answer without a body
+	func put(url: URL, parameters: [String: String]) async throws {
+		_ = try await authenticatedRequest(method: .put, url: url, parameters: parameters)
+	}
+	
+	/// Sends a JSON:API document to `openapi.tidal.com`
+	func send<Document: Encodable, Result: Decodable>(_ method: Network.HttpMethod, url: URL, parameters: [String: String] = [:], document: Document, decoder: JSONDecoder = .v2) async throws -> Result {
+		let response = try await authenticatedRequest(method: method, url: url, parameters: parameters, jsonBody: try JSONEncoder.v2.encode(document))
+		return try decoder.decode(Result.self, from: response.data)
+	}
+	
+	private func authenticatedRequest(method: Network.HttpMethod, url: URL, parameters: [String: String], etag: Int? = nil, jsonBody: Data? = nil, login: Config? = nil) async throws -> Response {
 		let login = login ?? config
 		// A failed proactive refresh isn't fatal here: the request itself
 		// surfaces the definitive error (network failure or 401 below)
 		try? await refreshAccessTokenIfNeeded(of: login)
-		var response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken, transport: transport)
+		var response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, jsonBody: jsonBody, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken, transport: transport)
 		if response.statusCode == 401 {
 			try await refreshAccessToken(of: login)
-			response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken, transport: transport)
+			response = try await Network.request(method: method, url: url, parameters: parameters, etag: etag, jsonBody: jsonBody, accessToken: login.accessToken, xTidalToken: AuthInformation.apiToken, transport: transport)
 		}
 		guard response.isSuccess else {
 			throw RequestError(statusCode: response.statusCode ?? 0, body: response.data)

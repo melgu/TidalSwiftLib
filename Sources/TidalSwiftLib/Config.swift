@@ -19,6 +19,10 @@ enum AuthInformation {
 	static let PKCEAuthorizeLocation = "https://login.tidal.com/authorize"
 	static let PKCERedirectUri = "https://tidal.com/android/login/auth"
 	static let APILocation = "https://api.tidal.com/v1"
+	/// The private v2 API, which has the playlist folders and favorite mixes
+	static let APIv2Location = "https://api.tidal.com/v2"
+	/// Tidal's official API, which can set the date of a favorite
+	static let OpenAPILocation = "https://openapi.tidal.com/v2"
 	static let AuthLocation = "https://auth.tidal.com/v1/oauth2"
 	static let ImageLocation = "https://resources.tidal.com/images"
 	static let apiToken = "_DSTon1kC8pABnTw" // Direct ALAC, 1080p Videos

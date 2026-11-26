@@ -61,11 +61,15 @@ extension Network {
 	
 	// MARK: - Queries
 	
-	enum HttpMethod {
-		case get
-		case post
-		case delete
+	enum HttpMethod: String {
+		case get = "GET"
+		case post = "POST"
+		case put = "PUT"
+		case delete = "DELETE"
 	}
+	
+	/// The media type of `openapi.tidal.com`, which takes and answers JSON:API documents
+	static let jsonAPIContentType = "application/vnd.api+json"
 	
 	static func encodeParameters(_ parameters: [String: String]) -> String {
 		let queryItems = parameters.map { URLQueryItem(name: $0, value: $1) }
@@ -101,9 +105,10 @@ extension Network {
 		try await URLSession.shared.data(for: request)
 	}
 	
-	static func request(method: HttpMethod, url: URL, parameters: [String: String], etag: Int? = nil, accessToken: String?, xTidalToken: String?, transport: HTTPTransport = urlSessionTransport) async throws -> Response {
+	/// - Parameter jsonBody: A JSON:API document to send. With it, the parameters are part of the URL.
+	static func request(method: HttpMethod, url: URL, parameters: [String: String], etag: Int? = nil, jsonBody: Data? = nil, accessToken: String?, xTidalToken: String?, transport: HTTPTransport = urlSessionTransport) async throws -> Response {
 		var request = URLRequest(url: url)
-		request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+		request.setValue(jsonBody == nil ? "application/x-www-form-urlencoded" : jsonAPIContentType, forHTTPHeaderField: "Content-Type")
 		if let accessToken = accessToken {
 			request.setValue(accessToken, forHTTPHeaderField: "Authorization")
 		}
@@ -114,21 +119,14 @@ extension Network {
 			request.setValue("\"\(etag)\"", forHTTPHeaderField: "If-None-Match")
 		}
 		
-		switch method {
-		case .get:
-			request.httpMethod = "GET"
-			// If GET or DELETE, parameters are part of the URL
-			let urlString = request.url!.absoluteString + "?" + encodeParameters(parameters)
-			request.url = URL(string: urlString)
-		case .post:
-			request.httpMethod = "POST"
-			// If POST or DELETE, parameters are part of the body
+		request.httpMethod = method.rawValue
+		// POSTs send their parameters as a form, unless they send a document. All others have them in the URL.
+		if method == .post && jsonBody == nil {
 			request.httpBody = encodeParameters(parameters).data(using: .utf8)
-		case .delete:
-			request.httpMethod = "DELETE"
-			// If GET or DELETE, parameters are part of the URL
+		} else {
 			let urlString = request.url!.absoluteString + "?" + encodeParameters(parameters)
 			request.url = URL(string: urlString)
+			request.httpBody = jsonBody
 		}
 		logger.debug("\(request.httpMethod!, privacy: .public) \(request.url!.absoluteString)")
 		// Private, as they hold the access token

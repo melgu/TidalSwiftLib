@@ -99,7 +99,7 @@ extension PlaylistEditing {
 		
 		// Duplicates are already left out above where they aren't wanted
 		var importer = PlaylistImporter(
-			add: { ids in await self.add(ids, to: playlistId, duplicate: true) },
+			add: { items in await self.add(items.map(\.id), to: playlistId, duplicate: true) },
 			alternatives: { isrc in await self.session.tracks(isrc: isrc) }
 		)
 		try await importer.add(items)
@@ -111,23 +111,23 @@ extension PlaylistEditing {
 	}
 }
 
-/// Adds items in batches and finds the ones Tidal doesn't know, as a single unknown ID fails the whole batch
+/// Adds items in batches and finds the ones Tidal doesn't know, as a single unknown ID fails the whole batch of a playlist
 struct PlaylistImporter {
 	/// Tidal takes at least 500 at once, fewer keep the requests small
 	static let defaultBatchSize = 100
 	
 	let batchSize: Int
-	let add: ([Int]) async -> AddOutcome
+	/// Adds the items by their ID. A replacement comes as the original item with the ID of the other track.
+	let send: ([PlaylistExport.Item]) async -> AddOutcome
 	let alternatives: (String) async -> [Track]?
 	
 	private(set) var added: [PlaylistExport.Item] = []
 	private(set) var replaced: [PlaylistImportResult.Replacement] = []
 	private(set) var missing: [PlaylistExport.Item] = []
 	
-	/// - Parameter batchSize: 1 adds the items one by one, e.g. to favorites, where items added together get the same date and lose their order
-	init(batchSize: Int = defaultBatchSize, add: @escaping ([Int]) async -> AddOutcome, alternatives: @escaping (String) async -> [Track]?) {
+	init(batchSize: Int = defaultBatchSize, add: @escaping ([PlaylistExport.Item]) async -> AddOutcome, alternatives: @escaping (String) async -> [Track]?) {
 		self.batchSize = batchSize
-		self.add = add
+		self.send = add
 		self.alternatives = alternatives
 	}
 	
@@ -139,9 +139,17 @@ struct PlaylistImporter {
 	
 	/// Splits a batch Tidal rejects into halves until the unknown items are found, which keeps the order
 	private mutating func addBatch(_ items: [PlaylistExport.Item]) async throws {
-		switch await add(items.map(\.id)) {
+		switch await send(items) {
 		case .added:
 			added += items
+		case let .partlyAdded(notFound):
+			for item in items {
+				if notFound.contains(item.id) {
+					try await replace(item)
+				} else {
+					added.append(item)
+				}
+			}
 		case .failed:
 			throw PlaylistImportError.couldNotAddItems
 		case .notFound:
@@ -165,10 +173,10 @@ struct PlaylistImporter {
 			missing.append(item)
 			return
 		}
-		switch await add([track.id]) {
+		switch await send([item.withId(track.id)]) {
 		case .added:
 			replaced.append(PlaylistImportResult.Replacement(original: item, track: track))
-		case .notFound:
+		case .notFound, .partlyAdded:
 			missing.append(item)
 		case .failed:
 			throw PlaylistImportError.couldNotAddItems

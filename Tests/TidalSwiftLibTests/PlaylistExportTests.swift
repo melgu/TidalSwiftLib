@@ -83,20 +83,29 @@ struct PlaylistImporterTests {
 	/// Records the IDs Tidal would have added, in order
 	final class FakePlaylist {
 		let known: Set<Int>
+		/// Adds the known IDs and lists the others, as the favorites of Tidal's official API do, instead of rejecting the batch
+		let addsKnown: Bool
 		var added: [Int] = []
+		var dates: [Int: Date] = [:]
 		var requests = 0
 		
-		init(known: Set<Int>) {
+		init(known: Set<Int>, addsKnown: Bool = false) {
 			self.known = known
+			self.addsKnown = addsKnown
 		}
 		
-		func add(_ ids: [Int]) -> AddOutcome {
+		func add(_ items: [PlaylistExport.Item]) -> AddOutcome {
 			requests += 1
-			guard ids.allSatisfy(known.contains) else {
+			let ids = items.map(\.id)
+			let unknown = Set(ids.filter { !known.contains($0) })
+			if !unknown.isEmpty && !addsKnown {
 				return .notFound
 			}
-			added += ids
-			return .added
+			for item in items where !unknown.contains(item.id) {
+				added.append(item.id)
+				dates[item.id] = item.dateAdded
+			}
+			return unknown.isEmpty ? .added : .partlyAdded(notFound: unknown)
 		}
 	}
 	
@@ -114,6 +123,21 @@ struct PlaylistImporterTests {
 		#expect(importer.replaced.map(\.original.id) == [4])
 		#expect(importer.replaced.map(\.track.id) == [40])
 		#expect(importer.missing.map(\.id) == [2])
+	}
+	
+	/// When Tidal adds the others of a batch, only the unknown items are replaced, and a replacement keeps the date of the original
+	@Test func replacesOnlyUnknownItemsOfPartlyAddedBatch() async throws {
+		let playlist = FakePlaylist(known: [1, 3, 40], addsKnown: true)
+		let alternatives = [try Self.track(id: 40)]
+		let date = Date(timeIntervalSince1970: 1_400_000_000)
+		var importer = PlaylistImporter(add: { playlist.add($0) }, alternatives: { $0 == "ISRC2" ? alternatives : [] })
+		try await importer.add([Self.item(1), Self.item(2, isrc: "ISRC2").dated(date), Self.item(3)])
+		
+		#expect(playlist.requests == 2)
+		#expect(playlist.added == [1, 3, 40])
+		#expect(playlist.dates[40] == date)
+		#expect(importer.added.map(\.id) == [1, 3])
+		#expect(importer.replaced.map(\.track.id) == [40])
 	}
 	
 	@Test func addsInBatches() async throws {

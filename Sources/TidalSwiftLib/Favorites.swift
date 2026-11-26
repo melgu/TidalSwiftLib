@@ -9,17 +9,19 @@
 import Foundation
 
 nonisolated public enum FavoriteKind: String, CaseIterable, Sendable {
-	case tracks, videos, albums, artists, playlists
+	case tracks, videos, albums, artists, playlists, mixes
 	
-	var idsParameter: String {
-		switch self {
-		case .tracks: "trackIds"
-		case .videos: "videoIds"
-		case .albums: "albumIds"
-		case .artists: "artistIds"
-		case .playlists: "uuids"
-		}
+	/// The type of `openapi.tidal.com`'s resources, nil for mixes, which it doesn't have
+	var openAPIType: String? {
+		self == .mixes ? nil : rawValue
 	}
+}
+
+/// A favorite to add, with the date it was added before
+nonisolated struct DatedFavorite: Equatable, Sendable {
+	let id: String
+	/// Nil gives it the current date
+	let addedAt: Date?
 }
 
 public class Favorites {
@@ -224,28 +226,77 @@ public class Favorites {
 		}
 	}
 	
+	// Mixes
+	
+	/// Newest first. Mixes are only in the v2 API.
+	public func mixes() async -> [FavoriteMix]? {
+		var mixes: [FavoriteMix] = []
+		var cursor: String?
+		do {
+			repeat {
+				var parameters = session.countryCode.map { ["countryCode": $0] } ?? [:]
+				parameters["limit"] = "50"
+				parameters["order"] = "DATE"
+				parameters["orderDirection"] = "DESC"
+				parameters["cursor"] = cursor
+				let response = try await session.get(url: URL(string: "\(AuthInformation.APIv2Location)/favorites/mixes")!, parameters: parameters)
+				let page = try JSONDecoder.v2.decode(FavoriteMixesPage.self, from: response.data)
+				mixes += page.items
+				cursor = page.cursor
+			} while cursor != nil
+			return mixes
+		} catch {
+			return nil
+		}
+	}
+	
 	// Several at once
 	
-	/// Adds the IDs, or UUIDs for playlists. Tidal gives favorites added together the same date, so their order gets lost.
-	func add(_ ids: [String], kind: FavoriteKind) async -> AddOutcome {
-		let url = URL(string: "\(baseUrl)/\(kind.rawValue)")!
-		var parameters = session.sessionParameters
-		parameters[kind.idsParameter] = ids.joined(separator: ",")
+	/// Most favorites Tidal's official API adds at once
+	static let addBatchSize = 50
+	
+	/// Adds up to ``addBatchSize`` favorites with their dates, through Tidal's official API, as v1 gives them all the current date.
+	/// - Returns: The IDs Tidal doesn't know, which it left out, or nil if it rejected the request
+	func add(_ favorites: [DatedFavorite], kind: FavoriteKind) async -> Set<String>? {
+		guard let type = kind.openAPIType else {
+			return await addMixes(favorites.map(\.id))
+		}
+		let collection = "userCollection" + kind.rawValue.prefix(1).uppercased() + kind.rawValue.dropFirst()
+		let url = URL(string: "\(AuthInformation.OpenAPILocation)/\(collection)/me/relationships/items")!
+		let document = CollectionItemsDocument(data: favorites.map { favorite in
+			.init(id: favorite.id, type: type, meta: favorite.addedAt.map(CollectionItemsDocument.Resource.Meta.init))
+		})
 		do {
-			_ = try await session.post(url: url, parameters: parameters)
-			return .added
-		} catch let error as RequestError where error.statusCode == 404 {
-			return .notFound
+			let answer: CollectionItemsAnswer = try await session.send(.post, url: url, parameters: session.countryCode.map { ["countryCode": $0] } ?? [:], document: document)
+			return answer.notFound
 		} catch {
-			return .failed
+			return nil
+		}
+	}
+	
+	/// Tidal can't set the date of a mix, so each gets the current date
+	private func addMixes(_ ids: [String]) async -> Set<String>? {
+		var parameters = session.countryCode.map { ["countryCode": $0] } ?? [:]
+		parameters["mixIds"] = ids.joined(separator: ",")
+		do {
+			let change: FavoriteMixesChange = try await session.put(url: URL(string: "\(AuthInformation.APIv2Location)/favorites/mixes/add")!, parameters: parameters)
+			return Set(change.itemsNotAdded ?? [])
+		} catch {
+			return nil
 		}
 	}
 	
 	/// Removes the IDs, or UUIDs for playlists. Tidal accepts IDs that aren't favorites.
 	func remove(_ ids: [String], kind: FavoriteKind) async -> Bool {
-		let url = URL(string: "\(baseUrl)/\(kind.rawValue)/\(ids.joined(separator: ","))")!
 		do {
-			_ = try await session.delete(url: url, parameters: session.sessionParameters)
+			if kind == .mixes {
+				var parameters = session.countryCode.map { ["countryCode": $0] } ?? [:]
+				parameters["mixIds"] = ids.joined(separator: ",")
+				try await session.put(url: URL(string: "\(AuthInformation.APIv2Location)/favorites/mixes/remove")!, parameters: parameters)
+			} else {
+				let url = URL(string: "\(baseUrl)/\(kind.rawValue)/\(ids.joined(separator: ","))")!
+				_ = try await session.delete(url: url, parameters: session.sessionParameters)
+			}
 			return true
 		} catch {
 			return false
@@ -259,6 +310,7 @@ public class Favorites {
 		case .albums: await refreshCachedAlbums()
 		case .artists: await refreshCachedArtists()
 		case .playlists: await refreshCachedPlaylists()
+		case .mixes: break
 		}
 	}
 	
