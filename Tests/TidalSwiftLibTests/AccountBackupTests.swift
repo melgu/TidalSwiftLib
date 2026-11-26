@@ -42,8 +42,8 @@ struct AccountBackupTests {
 		return try PlaylistExport(data: Data(json.utf8))
 	}
 	
-	static func existing(uuid: String, title: String, description: String? = nil, items: [Int]) -> Plan.ExistingPlaylist {
-		Plan.ExistingPlaylist(uuid: uuid, title: title, description: description, itemIds: items)
+	static func existing(uuid: String, title: String, description: String? = nil, items: [Int], isPublic: Bool = false) -> Plan.ExistingPlaylist {
+		Plan.ExistingPlaylist(uuid: uuid, title: title, description: description, itemIds: items, isPublic: isPublic)
 	}
 	
 	static func backup(favorites: AccountBackup.FavoriteLists = favorites(), playlists: [PlaylistExport] = [], folders: [AccountBackup.FolderEntry]? = []) -> AccountBackup {
@@ -189,15 +189,17 @@ struct AccountBackupTests {
 			try Self.export(uuid: "same", title: "Same", description: "Text", items: [1, 2]),
 			try Self.export(uuid: "order", title: "Order", items: [1, 2]),
 			try Self.export(uuid: "title", title: "Title", items: [1]),
+			try Self.export(uuid: "public", title: "Public", items: [1]),
 		]
 		let existing = [
 			Self.existing(uuid: "same", title: "Same", description: "Text", items: [1, 2]),
 			Self.existing(uuid: "order", title: "Order", description: "", items: [2, 1]),
 			Self.existing(uuid: "title", title: "Changed", items: [1]),
+			Self.existing(uuid: "public", title: "Public", items: [1], isPublic: true),
 			Self.existing(uuid: "extra", title: "Extra", items: []),
 		]
 		let changes = Plan.playlistChanges(backup, existing: existing, options: .init(override: true))
-		#expect(changes.map(\.isUnchanged) == [true, false, false])
+		#expect(changes.map(\.isUnchanged) == [true, false, false, false])
 		for change in changes[1...] {
 			guard case .replace = change else {
 				Issue.record("Expected a replacement, got \(change)")

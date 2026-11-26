@@ -99,6 +99,11 @@ nonisolated struct V2Playlist: Decodable, Equatable, Sendable {
 }
 
 extension Playlist {
+	/// The same playlist with another visibility
+	func withPublic(_ isPublic: Bool) -> Playlist {
+		Playlist(uuid: uuid, title: title, numberOfTracks: numberOfTracks, numberOfVideos: numberOfVideos, creator: creator, description: description, duration: duration, lastUpdated: lastUpdated, created: created, type: type, publicPlaylist: isPublic, url: url, image: image, popularity: popularity, squareImage: squareImage)
+	}
+	
 	/// - Note: v2 has no popularity, so it's 0
 	init?(_ playlist: V2Playlist) {
 		guard let type = PlaylistType(rawValue: playlist.type) else {

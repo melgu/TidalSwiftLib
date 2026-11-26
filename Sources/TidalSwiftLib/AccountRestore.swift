@@ -9,7 +9,7 @@
 import Foundation
 
 nonisolated public struct AccountRestoreOptions: Equatable, Sendable {
-	/// Also removes favorites the backup doesn't have, replaces the title, description and items of playlists with those of the backup,
+	/// Also removes favorites the backup doesn't have, replaces the title, description, visibility and items of playlists with those of the backup,
 	/// renames folders and moves folders and playlists to where the backup has them
 	public var override: Bool
 	/// Deletes own playlists and folders that aren't in the backup. The contents of a deleted folder are moved to the root.
@@ -44,13 +44,14 @@ nonisolated public struct AccountRestorePlan: Sendable {
 		public let description: String?
 		/// Track and video IDs
 		public let itemIds: [Int]
+		public internal(set) var isPublic: Bool = false
 	}
 	
 	public enum PlaylistChange: Sendable {
 		case create(PlaylistExport)
 		/// Appends the items the playlist doesn't have, as many as `count`
 		case append(PlaylistExport, to: ExistingPlaylist, count: Int)
-		/// Replaces title, description and items, only with ``AccountRestoreOptions/override``
+		/// Replaces title, description, visibility and items, only with ``AccountRestoreOptions/override``
 		case replace(PlaylistExport, ExistingPlaylist)
 		case unchanged(PlaylistExport, ExistingPlaylist)
 		/// Not in the backup, only with ``AccountRestoreOptions/deletePlaylists``
@@ -196,7 +197,7 @@ nonisolated public struct AccountRestorePlan: Sendable {
 			}
 			let ids = export.items.map(\.id)
 			if options.override {
-				let same = playlist.title == export.title && (playlist.description ?? "") == (export.description ?? "") && playlist.itemIds == ids
+				let same = playlist.title == export.title && (playlist.description ?? "") == (export.description ?? "") && playlist.isPublic == export.isPublic && playlist.itemIds == ids
 				return same ? .unchanged(export, playlist) : .replace(export, playlist)
 			}
 			var seen = Set(playlist.itemIds)
@@ -403,6 +404,7 @@ nonisolated public enum AccountRestoreError: Error, Equatable, CustomStringConve
 	case notLoggedIn
 	case couldNotRestorePlaylist(title: String, PlaylistImportError)
 	case couldNotDeletePlaylist(title: String)
+	case couldNotChangeVisibility(title: String)
 	case couldNotAddFavorites(FavoriteKind)
 	case couldNotRemoveFavorites(FavoriteKind)
 	case couldNotChangeFolders
@@ -412,6 +414,7 @@ nonisolated public enum AccountRestoreError: Error, Equatable, CustomStringConve
 		case .notLoggedIn: "Not logged in"
 		case let .couldNotRestorePlaylist(title, error): "Couldn't restore \(title): \(error.description)"
 		case let .couldNotDeletePlaylist(title): "Couldn't delete \(title)"
+		case let .couldNotChangeVisibility(title): "Couldn't make \(title) public or private"
 		case let .couldNotAddFavorites(kind): "Couldn't add the favorite \(kind.rawValue)"
 		case let .couldNotRemoveFavorites(kind): "Couldn't remove the favorite \(kind.rawValue)"
 		case .couldNotChangeFolders: "Couldn't change the folders"
@@ -437,7 +440,7 @@ extension Session {
 			guard let items = await playlistItems(playlistId: playlist.uuid) else {
 				throw AccountBackupError.couldNotLoadPlaylist(title: playlist.title)
 			}
-			existing.append(AccountRestorePlan.ExistingPlaylist(uuid: playlist.uuid, title: playlist.title, description: playlist.description, itemIds: items.map(\.mediaId)))
+			existing.append(AccountRestorePlan.ExistingPlaylist(uuid: playlist.uuid, title: playlist.title, description: playlist.description, itemIds: items.map(\.mediaId), isPublic: playlist.publicPlaylist))
 		}
 		let collection = backup.folders == nil ? nil : try await currentFolderItems()
 		return AccountRestorePlan(backup: backup, current: current, existing: existing, collection: collection, options: options)
@@ -513,11 +516,24 @@ extension Session {
 		case let .replace(replacement, playlist):
 			(export, mode) = (replacement, .replace(playlistId: playlist.uuid))
 		}
+		let imported: PlaylistImportResult
 		do {
-			return try await playlistEditing.importPlaylist(export, mode: mode)
+			imported = try await playlistEditing.importPlaylist(export, mode: mode)
 		} catch let error as PlaylistImportError {
 			throw AccountRestoreError.couldNotRestorePlaylist(title: export.title, error)
 		}
+		// New playlists are private. Appending leaves the visibility, as it only adds.
+		if case .append = mode {
+			return imported
+		}
+		guard imported.playlist.publicPlaylist != export.isPublic else {
+			return imported
+		}
+		guard await playlistEditing.setPublic(export.isPublic, playlistId: imported.playlist.uuid) else {
+			throw AccountRestoreError.couldNotChangeVisibility(title: export.title)
+		}
+		// Not read again, as v1 sometimes still answers with the old visibility right after the change
+		return PlaylistImportResult(playlist: imported.playlist.withPublic(export.isPublic), added: imported.added, replaced: imported.replaced, skipped: imported.skipped, missing: imported.missing)
 	}
 }
 

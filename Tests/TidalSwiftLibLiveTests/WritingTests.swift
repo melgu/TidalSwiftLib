@@ -183,7 +183,10 @@ extension LiveTests {
 				let source = try #require(await session.exportPlaylist(playlistId: playlist.uuid))
 				let extraPlaylist = try PlaylistExport(data: source.data()
 					.replacing(Data(playlist.uuid.utf8), with: Data("00000000-0000-4000-8000-000000000001".utf8))
-					.replacing(Data(#""title" : "\#(playlist.title)""#.utf8), with: Data(#""title" : "\#(title)""#.utf8)))
+					.replacing(Data(#""title" : "\#(playlist.title)""#.utf8), with: Data(#""title" : "\#(title)""#.utf8))
+					// Public, which the restore makes it again
+					.replacing(Data(#""public" : false"#.utf8), with: Data(#""public" : true"#.utf8)))
+				#expect(extraPlaylist.isPublic)
 				// An old date, which the restore keeps
 				let extraDate = Date(timeIntervalSince1970: 1_500_000_000)
 				let folderName = "TidalSwiftLib Test Folder \(Date().formatted(.iso8601))"
@@ -216,6 +219,10 @@ extension LiveTests {
 				#expect(plan.folders.moves.map(\.title) == [title])
 				let result = try await session.restore(plan)
 				let created = try #require(result.ownPlaylists.compactMap(\.imported).first { $0.playlist.title == title }?.playlist)
+				#expect(created.publicPlaylist)
+				#expect(await session.playlist(playlistId: playlist.uuid)?.publicPlaylist == false)
+				// The v2 listing has the visibility right away, v1 sometimes only a moment later
+				#expect(await session.playlistFolders.all()?.contains { if case let .playlist(listed, _, _) = $0 { listed.uuid == created.uuid && listed.publicPlaylist } else { false } } == true)
 				let folderId = try await session.playlistFolders.items().first { $0.itemType == .folder && $0.name == folderName }?.id
 				do {
 					#expect(result.tracks.added.map(\.id) == [extraFavorite])
@@ -261,6 +268,17 @@ extension LiveTests {
 				#expect(await favorites.removeTrack(trackId: TestItems.trackId))
 			}
 			#expect(await favorites.doFavoritesContainTrack(trackId: TestItems.trackId) == wasFavorite)
+		}
+		
+		/// Makes the temporary playlist public for a moment
+		@Test func playlistVisibility() async throws {
+			try await withTemporaryPlaylist { session, playlist in
+				#expect(!playlist.publicPlaylist)
+				#expect(await session.playlistEditing.setPublic(true, playlistId: playlist.uuid))
+				#expect(await session.playlist(playlistId: playlist.uuid)?.publicPlaylist == true)
+				#expect(await session.playlistEditing.setPublic(false, playlistId: playlist.uuid))
+				#expect(await session.playlist(playlistId: playlist.uuid)?.publicPlaylist == false)
+			}
 		}
 		
 		/// Creates two nested folders with the temporary playlist in the inner one, and deletes them again

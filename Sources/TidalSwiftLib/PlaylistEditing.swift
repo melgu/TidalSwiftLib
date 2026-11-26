@@ -139,6 +139,17 @@ public class PlaylistEditing {
 		}
 	}
 	
+	/// Makes a playlist public, so others can find it on the profile, or private. Through the v2 API, as v1 can't change it.
+	public func setPublic(_ isPublic: Bool, playlistId: String) async -> Bool {
+		let url = URL(string: "\(AuthInformation.APIv2Location)/playlists/\(playlistId)/\(isPublic ? "set-public" : "set-private")")!
+		do {
+			try await session.put(url: url, parameters: session.countryCode.map { ["countryCode": $0] } ?? [:])
+			return true
+		} catch {
+			return false
+		}
+	}
+	
 	public func delete(playlistId: String) async -> Bool {
 		let url = URL(string: "\(baseUrl)/\(playlistId)")!
 		do {
